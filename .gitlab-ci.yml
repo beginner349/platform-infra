@@ -3,8 +3,9 @@ workflow:
     - if: $CI_PIPELINE_SOURCE == "web"
     - when: never
 
-image: hashicorp/terraform:1.14
-entrypoint: [""]
+image: 
+  name: hashicorp/terraform:1.14
+  entrypoint: [""]
 variables:
   TF_ROOT: ${CI_PROJECT_DIR}/terraform
   TF_ADDRESS: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/terraform/state/${CI_PROJECT_NAME}
