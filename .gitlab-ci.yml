@@ -17,6 +17,7 @@ variables:
   TF_HTTP_LOCK_METHOD: "POST"
   TF_HTTP_UNLOCK_METHOD: "DELETE"
   TF_HTTP_RETRY_WAIT_MIN: 5
+  AWS_ROLE_ARN: "arn:aws:iam::542776678091:oidc-provider/gitlab.com"
 
 cache:
   key: terraform-cache-${CI_COMMIT_REF_SLUG}
@@ -42,7 +43,14 @@ validate:
 
 plan:
   stage: plan
+  id_tokens:
+    GITLAB_OIDC_TOKEN:
+      aud: sts.amazonaws.com  # Must match the "Audience" in your AWS OIDC Provider
   script:
+    - mkdir -p ~/.aws
+    # Convert the environment variable token into a file
+    - echo "${GITLAB_OIDC_TOKEN}" > /tmp/web_identity_token
+    - export AWS_WEB_IDENTITY_TOKEN_FILE=/tmp/web_identity_token  
     - terraform plan -out=tfplan -input=false
   artifacts:
     paths:
