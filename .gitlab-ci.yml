@@ -52,3 +52,10 @@ deploy:
   dependencies:
     - plan
   when: manual
+
+cleanup:
+  stage: cleanup
+  script:
+    - terraform destroy -auto-approve
+  when: manual
+  
