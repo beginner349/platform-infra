@@ -17,7 +17,6 @@ variables:
   TF_HTTP_LOCK_METHOD: "POST"
   TF_HTTP_UNLOCK_METHOD: "DELETE"
   TF_HTTP_RETRY_WAIT_MIN: 5
-  AWS_ROLE_ARN: "arn:aws:iam::542776678091:oidc-provider/gitlab.com"
 
 cache:
   key: terraform-cache-${CI_COMMIT_REF_SLUG}
