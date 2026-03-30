@@ -26,23 +26,13 @@ cache:
 before_script:
   - cd ${TF_ROOT}
   - terraform --version
+  - terraform init -input=false
 
 stages:
-  - init
   - validate
   - plan
   - deploy
   - cleanup
-
-init:
-  stage: init
-  script:
-    - terraform init -input=false
-  artifacts:
-    paths:
-      - ${TF_ROOT}/.terraform
-      - ${TF_ROOT}/.terraform.lock.hcl
-    expire_in: 2 hours
 
 validate:
   stage: validate
@@ -56,14 +46,12 @@ plan:
     - terraform plan -out=tfplan -input=false
   artifacts:
     paths:
-      - tfplan
+      - ${TF_ROOT}/tfplan      
 
 deploy:
   stage: deploy
   script:
     - terraform apply -input=false -auto-approve tfplan
-  dependencies:
-    - plan
   when: manual
 
 cleanup:
