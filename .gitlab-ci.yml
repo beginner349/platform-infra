@@ -9,6 +9,14 @@ image:
 variables:
   TF_ROOT: ${CI_PROJECT_DIR}/terraform
   TF_ADDRESS: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/terraform/state/${CI_PROJECT_NAME}
+  TF_HTTP_USERNAME: "gitlab-ci-token"
+  TF_HTTP_PASSWORD: ${CI_JOB_TOKEN}
+  TF_HTTP_ADDRESS: ${TF_ADDRESS}
+  TF_HTTP_LOCK_ADDRESS: ${TF_ADDRESS}/lock
+  TF_HTTP_UNLOCK_ADDRESS: ${TF_ADDRESS}/lock
+  TF_HTTP_LOCK_METHOD: "POST"
+  TF_HTTP_UNLOCK_METHOD: "DELETE"
+  TF_HTTP_RETRY_WAIT_MIN: 5
 
 cache:
   key: terraform-cache-${CI_COMMIT_REF_SLUG}
@@ -29,18 +37,18 @@ stages:
 init:
   stage: init
   script:
-    - chmod +x ./init.sh
-    - ./init.sh
+    - terraform init -input=false
   artifacts:
     paths:
       - ${TF_ROOT}/.terraform
       - ${TF_ROOT}/.terraform.lock.hcl
-    expire_in: 2 hours    
+    expire_in: 2 hours
 
 validate:
   stage: validate
   script:
     - terraform validate
+    - terraform fmt
 
 plan:
   stage: plan
