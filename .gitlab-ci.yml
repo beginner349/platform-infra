@@ -20,13 +20,35 @@ before_script:
   - terraform --version
 
 stages:
-  - prepare
+  - init
   - validate
-  - build
+  - plan
   - deploy
+  - cleanup
 
 init:
-  stage: prepare
+  stage: init
   script:
     - chmod +x ./init.sh
     - ./init.sh
+
+validate:
+  stage: validate
+  script:
+    - terraform validate
+
+plan:
+  stage: plan
+  script:
+    - terraform plan -out=tfplan -input=false
+  artifacts:
+    paths:
+      - tfplan
+
+deploy:
+  stage: deploy
+  script:
+    - terraform apply -input=false -auto-approve tfplan
+  dependencies:
+    - plan
+  when: manual
