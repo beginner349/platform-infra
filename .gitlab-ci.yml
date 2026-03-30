@@ -3,7 +3,7 @@ workflow:
     - if: $CI_PIPELINE_SOURCE == "web"
     - when: never
 
-image: 
+image:
   name: hashicorp/terraform:1.14
   entrypoint: [""]
 variables:
@@ -11,7 +11,7 @@ variables:
   TF_ADDRESS: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/terraform/state/${CI_PROJECT_NAME}
 
 cache:
-  key: terraform-cache
+  key: terraform-cache-${CI_COMMIT_REF_SLUG}
   paths:
     - ${TF_ROOT}/.terraform
 
@@ -31,6 +31,11 @@ init:
   script:
     - chmod +x ./init.sh
     - ./init.sh
+  artifacts:
+    paths:
+      - ${TF_ROOT}/.terraform
+      - ${TF_ROOT}/.terraform.lock.hcl
+    expire_in: 2 hours    
 
 validate:
   stage: validate
@@ -58,4 +63,3 @@ cleanup:
   script:
     - terraform destroy -auto-approve
   when: manual
-  
