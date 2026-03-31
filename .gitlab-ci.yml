@@ -57,12 +57,26 @@ plan:
 
 deploy:
   stage: deploy
+  id_tokens:
+    GITLAB_OIDC_TOKEN:
+      aud: sts.amazonaws.com  # Must match the "Audience" in your AWS OIDC Provider  
   script:
+    - mkdir -p ~/.aws
+    # Convert the environment variable token into a file
+    - echo "${GITLAB_OIDC_TOKEN}" > /tmp/web_identity_token
+    - export AWS_WEB_IDENTITY_TOKEN_FILE=/tmp/web_identity_token  
     - terraform apply -input=false -auto-approve tfplan
   when: manual
 
 cleanup:
   stage: cleanup
+  id_tokens:
+    GITLAB_OIDC_TOKEN:
+      aud: sts.amazonaws.com  # Must match the "Audience" in your AWS OIDC Provider  
   script:
+    - mkdir -p ~/.aws
+    # Convert the environment variable token into a file
+    - echo "${GITLAB_OIDC_TOKEN}" > /tmp/web_identity_token
+    - export AWS_WEB_IDENTITY_TOKEN_FILE=/tmp/web_identity_token  
     - terraform destroy -auto-approve
   when: manual
