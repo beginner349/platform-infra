@@ -9,6 +9,145 @@ data "aws_availability_zones" "available" {
   }
 }
 
+# Data sources to get default VPC and Subnets
+data "aws_vpc" "default" {
+  default = true
+}
+
+data "aws_subnets" "default" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.default.id]
+  }
+}
+
+# Security Group for ALB (Allow HTTP)
+resource "aws_security_group" "alb_sg" {
+  name   = "alb-sg"
+  vpc_id = data.aws_vpc.default.id
+
+  tags = local.tags
+}
+
+resource "aws_vpc_security_group_ingress_rule" "allow_tcp_traffic_ipv4" {
+  security_group_id = aws_security_group.alb_sg.id
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 80
+  ip_protocol       = "tcp"
+  to_port           = 80
+
+  tags = local.tags
+}
+
+resource "aws_vpc_security_group_egress_rule" "allow_all_traffic_ipv4_alb" {
+  security_group_id = aws_security_group.alb_sg.id
+  cidr_ipv4         = "0.0.0.0/0"
+  ip_protocol       = "-1" # semantically equivalent to all ports
+
+  tags = local.tags
+}
+
+# Security Group for EC2 (Allow traffic from ALB and SSH)
+resource "aws_security_group" "ec2_sg" {
+  name   = "ec2-sg"
+  vpc_id = data.aws_vpc.default.id
+
+  tags = local.tags
+}
+
+resource "aws_vpc_security_group_ingress_rule" "allow_tcp_traffic_ipv4_from_alb" {
+  security_group_id            = aws_security_group.ec2_sg.id
+  cidr_ipv4                    = "0.0.0.0/0"
+  from_port                    = 80
+  ip_protocol                  = "tcp"
+  to_port                      = 80
+  referenced_security_group_id = aws_security_group.alb_sg.id
+
+  tags = local.tags
+}
+
+resource "aws_vpc_security_group_ingress_rule" "allow_ssh_traffic_ipv4" {
+  security_group_id = aws_security_group.ec2_sg.id
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 22
+  ip_protocol       = "tcp"
+  to_port           = 22
+
+  tags = local.tags
+}
+
+resource "aws_vpc_security_group_egress_rule" "allow_all_traffic_ipv4_ec2" {
+  security_group_id = aws_security_group.ec2_sg.id
+  cidr_ipv4         = "0.0.0.0/0"
+  ip_protocol       = "-1" # semantically equivalent to all ports
+
+  tags = local.tags
+}
+
+data "aws_ssm_parameter" "al2023_latest" {
+  name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
+}
+
+resource "aws_instance" "web_server" {
+  ami                    = data.aws_ssm_parameter.al2023_latest.value
+  instance_type          = "m7i.large"
+  key_name               = "ec2-key-pair"
+  vpc_security_group_ids = [aws_security_group.ec2_sg.id]
+  subnet_id              = data.aws_subnets.default.ids[0]
+
+  # The Mock Server Script
+  user_data = <<-EOF
+              #!/bin/bash
+              # Update packages
+              dnf update -y
+              # Install Apache
+              dnf install -y httpd
+              # Start and enable Apache
+              systemctl start httpd
+              systemctl enable httpd
+              # Create a simple mock response
+              echo "<h1>Mock Server is Live!</h1>" > /var/www/html/index.html
+              EOF
+
+  tags = local.tags
+}
+
+# Application Load Balancer
+resource "aws_lb" "main_alb" {
+  name               = "main-alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.alb_sg.id]
+  subnets            = data.aws_subnets.default.ids
+}
+
+# Target Group
+resource "aws_lb_target_group" "tg" {
+  name     = "main-tg"
+  port     = 80
+  protocol = "HTTP"
+  vpc_id   = data.aws_vpc.default.id
+}
+
+# Listener
+resource "aws_lb_listener" "front_end" {
+  load_balancer_arn = aws_lb.main_alb.arn
+  port              = "80"
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.tg.arn
+  }
+}
+
+# Attachment
+resource "aws_lb_target_group_attachment" "attachment" {
+  target_group_arn = aws_lb_target_group.tg.arn
+  target_id        = aws_instance.web_server.id
+  port             = 80
+}
+
 locals {
   region = "ap-southeast-1"
 
@@ -21,6 +160,7 @@ locals {
   }
 }
 
+/*
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "6.6.0"
@@ -98,6 +238,8 @@ resource "aws_eks_cluster" "dev-auto-cluster" {
     aws_iam_role_policy_attachment.cluster_AmazonEKSLoadBalancingPolicy,
     aws_iam_role_policy_attachment.cluster_AmazonEKSNetworkingPolicy,
   ]
+
+  tags = local.tags
 }
 
 data "aws_iam_policy_document" "cluster-trust-policy" {
@@ -168,3 +310,4 @@ resource "aws_iam_role_policy_attachment" "node_AmazonEC2ContainerRegistryPullOn
   policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPullOnly"
   role       = aws_iam_role.node.name
 }
+*/

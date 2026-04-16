@@ -1,3 +1,4 @@
+/*
 output "cluster_endpoint" {
   description = "Endpoint for EKS control plane"
   value       = aws_eks_cluster.dev-auto-cluster.endpoint
@@ -11,4 +12,13 @@ output "cluster_security_group_id" {
 output "cluster_name" {
   description = "Kubernetes Cluster Name"
   value       = aws_eks_cluster.dev-auto-cluster.id
+}
+*/
+
+output "alb_dns" {
+  value = aws_lb.main_alb.dns_name
+}
+
+output "instance_public_ip" {
+  value = aws_instance.web_server.public_ip
 }
