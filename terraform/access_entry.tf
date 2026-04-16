@@ -1,3 +1,4 @@
+/*
 # The name MUST match the part after TF_VAR_
 variable "AWS_ROLE_NAME" {
   type        = string
@@ -23,3 +24,4 @@ resource "aws_eks_access_policy_association" "aws_eks_access_policy_association"
     type = "cluster"
   }
 }
+*/
