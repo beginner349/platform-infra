@@ -9,22 +9,10 @@ data "aws_availability_zones" "available" {
   }
 }
 
-# Data sources to get default VPC and Subnets
-data "aws_vpc" "default" {
-  default = true
-}
-
-data "aws_subnets" "default" {
-  filter {
-    name   = "vpc-id"
-    values = [data.aws_vpc.default.id]
-  }
-}
-
 # Security Group for ALB (Allow HTTP)
 resource "aws_security_group" "alb_sg" {
   name   = "alb-sg"
-  vpc_id = data.aws_vpc.default.id
+  vpc_id = module.vpc.vpc_id
 
   tags = local.tags
 }
@@ -50,7 +38,7 @@ resource "aws_vpc_security_group_egress_rule" "allow_all_traffic_ipv4_alb" {
 # Security Group for EC2 (Allow traffic from ALB and SSH)
 resource "aws_security_group" "ec2_sg" {
   name   = "ec2-sg"
-  vpc_id = data.aws_vpc.default.id
+  vpc_id = module.vpc.vpc_id
 
   tags = local.tags
 }
@@ -92,7 +80,7 @@ resource "aws_instance" "web_server" {
   instance_type          = "m7i.large"
   key_name               = "ec2-key-pair"
   vpc_security_group_ids = [aws_security_group.ec2_sg.id]
-  subnet_id              = data.aws_subnets.default.ids[0]
+  subnet_id              = module.vpc.public_subnets[0]
 
   # The Mock Server Script
   user_data = <<-EOF
@@ -117,7 +105,7 @@ resource "aws_lb" "main_alb" {
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb_sg.id]
-  subnets            = data.aws_subnets.default.ids
+  subnets            = module.vpc.public_subnets
 }
 
 # Target Group
@@ -125,7 +113,7 @@ resource "aws_lb_target_group" "tg" {
   name     = "main-tg"
   port     = 80
   protocol = "HTTP"
-  vpc_id   = data.aws_vpc.default.id
+  vpc_id   = module.vpc.vpc_id
 }
 
 # Listener
@@ -159,25 +147,101 @@ locals {
   }
 }
 
-/*
+# Security Group for Aurora Postgres (Allow inbound traffic strictly from the EC2 SG)
+resource "aws_security_group" "aurora_sg" {
+  name   = "aurora-postgres-sg"
+  vpc_id = module.vpc.vpc_id
+
+  tags = local.tags
+}
+
+resource "aws_vpc_security_group_ingress_rule" "allow_tcp_traffic_from_ec2" {
+  security_group_id            = aws_security_group.aurora_sg.id
+  from_port                    = 5432
+  ip_protocol                  = "tcp"
+  to_port                      = 5432
+  referenced_security_group_id = aws_security_group.ec2_sg.id
+
+  tags = local.tags
+}
+
+resource "aws_vpc_security_group_egress_rule" "allow_all_traffic_aurora" {
+  security_group_id = aws_security_group.aurora_sg.id
+  cidr_ipv4         = "0.0.0.0/0"
+  ip_protocol       = "-1" # semantically equivalent to all ports
+
+  tags = local.tags
+}
+
+resource "aws_db_subnet_group" "aurora_subnet_group" {
+  name       = "aurora-db-subnet-group"
+  subnet_ids = module.vpc.database_subnets # Ensure DB is in database subnets
+  tags       = local.tags
+}
+
+resource "aws_rds_cluster" "aurora_cluster" {
+  cluster_identifier = "dev-aurora-postgres-cluster"
+  engine             = "aurora-postgresql"
+  engine_mode        = "provisioned"
+  engine_version     = "17.7"
+  database_name      = "devdb"
+  master_username    = "postgres"
+
+  # The magic flag for Secrets Manager integration!
+  manage_master_user_password = true
+
+  db_subnet_group_name   = aws_db_subnet_group.aurora_subnet_group.name
+  vpc_security_group_ids = [aws_security_group.aurora_sg.id]
+
+  # CRITICAL for learning: Allows `terraform destroy` to work cleanly without
+  # hanging to take a final snapshot of the database.
+  skip_final_snapshot = true
+
+  # Aurora Serverless v2 Scaling configuration
+  serverlessv2_scaling_configuration {
+    min_capacity = 0.5 # Minimum Aurora Capacity Units (ACUs)
+    max_capacity = 1.0 # Maximum ACUs (keeps costs completely capped for learning)
+  }
+
+  tags = local.tags
+}
+
+# ------------------------------------------------------------------------------
+# Aurora Cluster Instance (Serverless v2)
+# ------------------------------------------------------------------------------
+resource "aws_rds_cluster_instance" "aurora_instances" {
+  count               = 1 # Just 1 instance is needed for testing/learning
+  identifier          = "dev-aurora-instance-${count.index}"
+  cluster_identifier  = aws_rds_cluster.aurora_cluster.id
+  engine              = aws_rds_cluster.aurora_cluster.engine
+  engine_version      = aws_rds_cluster.aurora_cluster.engine_version
+  
+  # "db.serverless" maps the instance to the Serverless v2 scaling config above
+  instance_class      = "db.serverless"
+  
+  publicly_accessible = false
+  db_subnet_group_name = aws_db_subnet_group.aurora_subnet_group.name
+
+  tags = local.tags
+}
+
 module "vpc" {
+  # refer to https://github.com/terraform-aws-modules/terraform-aws-vpc/blob/master/variables.tf for the available paramters in the module
+
   source  = "terraform-aws-modules/vpc/aws"
   version = "6.6.0"
 
-  name = "eks-vpc"
+  name = "custom-vpc"
 
   cidr = local.vpc_cidr
   azs  = local.azs
 
   private_subnets = [for k, v in local.azs : cidrsubnet(local.vpc_cidr, 4, k)]
   public_subnets  = [for k, v in local.azs : cidrsubnet(local.vpc_cidr, 8, k + 48)]
-  # private_subnets = ["10.0.128.0/20", "10.0.144.0/20"]
-  # public_subnets  = ["10.0.0.0/20", "10.0.16.0/20"]
-
+  database_subnets = [for k, v in local.azs : cidrsubnet(local.vpc_cidr, 4, k + 8)]
+  
   enable_nat_gateway   = true
   single_nat_gateway   = true
-  enable_dns_hostnames = true
-  enable_dns_support   = true
 
   public_subnet_tags = {
     "kubernetes.io/role/elb" = 1
@@ -190,6 +254,7 @@ module "vpc" {
   tags = local.tags
 }
 
+/*
 resource "aws_eks_cluster" "dev-auto-cluster" {
   name    = "dev-auto-cluster"
   version = "1.35"

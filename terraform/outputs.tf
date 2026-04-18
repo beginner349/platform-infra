@@ -22,3 +22,18 @@ output "alb_dns" {
 output "instance_public_ip" {
   value = aws_instance.web_server.public_ip
 }
+
+output "aurora_cluster_endpoint" {
+  description = "The writer endpoint for the Aurora cluster"
+  value       = aws_rds_cluster.aurora_cluster.endpoint
+}
+
+output "aurora_cluster_port" {
+  description = "The port for the Aurora cluster"
+  value       = aws_rds_cluster.aurora_cluster.port
+}
+
+output "aurora_secret_arn" {
+  description = "The ARN of the Secrets Manager secret containing the DB credentials"
+  value       = aws_rds_cluster.aurora_cluster.master_user_secret[0].secret_arn
+}
