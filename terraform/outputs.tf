@@ -37,7 +37,7 @@ output "aurora_cluster_port" {
 # Ensure your RDS username/password are accessible, 
 # ideally pulled from AWS Secrets Manager or passed as variables.
 output "rds_username" {
-  value = aws_rds_cluster.aurora_cluster.username
+  value = aws_rds_cluster.aurora_cluster.master_username
 }
 
 output "aurora_secret_arn" {
