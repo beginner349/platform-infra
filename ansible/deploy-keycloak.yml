@@ -23,13 +23,15 @@
       changed_when: false
 
     - name: Run Keycloak Docker Container
-      shell: >
+      command: >
         docker run -d --name keycloak --restart unless-stopped
         -p 80:8080
         -e KC_DB=postgres
         -e KC_DB_URL=jdbc:postgresql://{{ db_endpoint }}:5432/keycloak
         -e KC_DB_USERNAME=postgres
-        -e KC_DB_PASSWORD={{ db_password.stdout | quote }}
+        -e KC_DB_PASSWORD="{{ db_password.stdout }}"
+        -e KEYCLOAK_ADMIN=admin
+        -e KEYCLOAK_ADMIN_PASSWORD=password
         quay.io/keycloak/keycloak:26.6.1 start-dev
       args:
         creates: /var/lib/docker/containers/keycloak # Basic idempotency check
