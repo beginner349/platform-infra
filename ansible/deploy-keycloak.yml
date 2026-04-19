@@ -29,7 +29,7 @@
         -e KC_DB=postgres
         -e KC_DB_URL=jdbc:postgresql://{{ db_endpoint }}:5432/keycloak
         -e KC_DB_USERNAME=postgres
-        -e KC_DB_PASSWORD={{ db_password.stdout }}
+        -e KC_DB_PASSWORD={{ db_password.stdout | quote }}
         quay.io/keycloak/keycloak:26.6.1 start-dev
       args:
         creates: /var/lib/docker/containers/keycloak # Basic idempotency check
