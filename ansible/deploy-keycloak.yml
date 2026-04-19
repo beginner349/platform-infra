@@ -1,0 +1,35 @@
+---
+- name: Deploy Keycloak with Aurora DB
+  hosts: all
+  become: yes
+  tasks:
+    - name: Install Docker and jq
+      dnf:
+        name:
+          - docker
+          - jq
+        state: present
+
+    - name: Start and enable Docker service
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Fetch Aurora Password from AWS Secrets Manager
+      shell: |
+        aws secretsmanager get-secret-value --region ap-southeast-1 --secret-id {{ secret_arn }} --query SecretString --output text | jq -r .password
+      register: db_password
+      changed_when: false
+
+    - name: Run Keycloak Docker Container
+      shell: >
+        docker run -d --name keycloak --restart unless-stopped
+        -p 80:8080
+        -e KC_DB=postgres
+        -e KC_DB_URL=jdbc:postgresql://{{ db_endpoint }}:5432/devdb
+        -e KC_DB_USERNAME=postgres
+        -e KC_DB_PASSWORD={{ db_password.stdout }}
+        quay.io/keycloak/keycloak:26.6.1 start-dev
+      args:
+        creates: /var/lib/docker/containers/keycloak # Basic idempotency check

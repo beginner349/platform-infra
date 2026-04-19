@@ -44,7 +44,7 @@ resource "aws_security_group" "ec2_sg" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "allow_tcp_traffic_ipv4_from_alb" {
-  security_group_id            = aws_security_group.ec2_sg.id  
+  security_group_id            = aws_security_group.ec2_sg.id
   from_port                    = 80
   ip_protocol                  = "tcp"
   to_port                      = 80
@@ -75,6 +75,45 @@ data "aws_ssm_parameter" "al2023_latest" {
   name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
 }
 
+# 1. Create an IAM Role for the EC2 Instance
+resource "aws_iam_role" "ec2_secrets_role" {
+  name = "ec2-secrets-role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
+    }]
+  })
+}
+
+# 2. Grant permission to read the specific Aurora Secret
+resource "aws_iam_policy" "ec2_secrets_policy" {
+  name = "ec2-secrets-policy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "secretsmanager:GetSecretValue"
+      Effect = "Allow"
+      # This dynamically references the secret created by the Aurora module
+      Resource = aws_rds_cluster.aurora_cluster.master_user_secret[0].secret_arn
+    }]
+  })
+}
+
+# 3. Attach the policy to the role
+resource "aws_iam_role_policy_attachment" "ec2_secrets_attach" {
+  role       = aws_iam_role.ec2_secrets_role.name
+  policy_arn = aws_iam_policy.ec2_secrets_policy.arn
+}
+
+# 4. Create the Instance Profile
+resource "aws_iam_instance_profile" "ec2_profile" {
+  name = "ec2-profile"
+  role = aws_iam_role.ec2_secrets_role.name
+}
+
 resource "aws_instance" "web_server" {
   ami                    = data.aws_ssm_parameter.al2023_latest.value
   instance_type          = "m7i.large"
@@ -82,19 +121,9 @@ resource "aws_instance" "web_server" {
   vpc_security_group_ids = [aws_security_group.ec2_sg.id]
   subnet_id              = module.vpc.public_subnets[0]
 
-  # The Mock Server Script
-  user_data = <<-EOF
-              #!/bin/bash
-              # Update packages
-              dnf update -y
-              # Install Apache
-              dnf install -y httpd
-              # Start and enable Apache
-              systemctl start httpd
-              systemctl enable httpd
-              # Create a simple mock response
-              echo "<h1>Mock Server is Live!</h1>" > /var/www/html/index.html
-              EOF
+  associate_public_ip_address = true
+
+  iam_instance_profile = aws_iam_instance_profile.ec2_profile.name # ADD THIS LINE
 
   tags = local.tags
 }
@@ -184,7 +213,7 @@ resource "aws_rds_cluster" "aurora_cluster" {
   engine             = "aurora-postgresql"
   engine_mode        = "provisioned"
   engine_version     = "17.7"
-  database_name      = "devdb"
+  database_name      = "keycloak"
   master_username    = "postgres"
 
   # The magic flag for Secrets Manager integration!
@@ -210,16 +239,16 @@ resource "aws_rds_cluster" "aurora_cluster" {
 # Aurora Cluster Instance (Serverless v2)
 # ------------------------------------------------------------------------------
 resource "aws_rds_cluster_instance" "aurora_instances" {
-  count               = 1 # Just 1 instance is needed for testing/learning
-  identifier          = "dev-aurora-instance-${count.index}"
-  cluster_identifier  = aws_rds_cluster.aurora_cluster.id
-  engine              = aws_rds_cluster.aurora_cluster.engine
-  engine_version      = aws_rds_cluster.aurora_cluster.engine_version
-  
+  count              = 1 # Just 1 instance is needed for testing/learning
+  identifier         = "dev-aurora-instance-${count.index}"
+  cluster_identifier = aws_rds_cluster.aurora_cluster.id
+  engine             = aws_rds_cluster.aurora_cluster.engine
+  engine_version     = aws_rds_cluster.aurora_cluster.engine_version
+
   # "db.serverless" maps the instance to the Serverless v2 scaling config above
-  instance_class      = "db.serverless"
-  
-  publicly_accessible = false
+  instance_class = "db.serverless"
+
+  publicly_accessible  = false
   db_subnet_group_name = aws_db_subnet_group.aurora_subnet_group.name
 
   tags = local.tags
@@ -236,12 +265,12 @@ module "vpc" {
   cidr = local.vpc_cidr
   azs  = local.azs
 
-  private_subnets = [for k, v in local.azs : cidrsubnet(local.vpc_cidr, 4, k)]
-  public_subnets  = [for k, v in local.azs : cidrsubnet(local.vpc_cidr, 8, k + 48)]
+  private_subnets  = [for k, v in local.azs : cidrsubnet(local.vpc_cidr, 4, k)]
+  public_subnets   = [for k, v in local.azs : cidrsubnet(local.vpc_cidr, 8, k + 48)]
   database_subnets = [for k, v in local.azs : cidrsubnet(local.vpc_cidr, 4, k + 8)]
-  
-  enable_nat_gateway   = true
-  single_nat_gateway   = true
+
+  enable_nat_gateway = true
+  single_nat_gateway = true
 
   public_subnet_tags = {
     "kubernetes.io/role/elb" = 1

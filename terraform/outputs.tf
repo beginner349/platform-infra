@@ -19,8 +19,9 @@ output "alb_dns" {
   value = aws_lb.main_alb.dns_name
 }
 
-output "instance_public_ip" {
-  value = aws_instance.web_server.public_ip
+output "ec2_public_ip" {
+  value       = aws_instance.web_server.public_ip
+  description = "Public IP of the EC2 instance"
 }
 
 output "aurora_cluster_endpoint" {
@@ -31,6 +32,12 @@ output "aurora_cluster_endpoint" {
 output "aurora_cluster_port" {
   description = "The port for the Aurora cluster"
   value       = aws_rds_cluster.aurora_cluster.port
+}
+
+# Ensure your RDS username/password are accessible, 
+# ideally pulled from AWS Secrets Manager or passed as variables.
+output "rds_username" {
+  value = aws_rds_cluster.aurora_cluster.username
 }
 
 output "aurora_secret_arn" {

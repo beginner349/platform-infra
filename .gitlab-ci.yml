@@ -32,6 +32,7 @@ stages:
   - validate
   - plan
   - deploy
+  - ansible_deploy
   - cleanup
 
 validate:
@@ -66,7 +67,44 @@ deploy:
     - echo "${GITLAB_OIDC_TOKEN}" > /tmp/web_identity_token
     - export AWS_WEB_IDENTITY_TOKEN_FILE=/tmp/web_identity_token  
     - terraform apply -input=false -auto-approve tfplan
+
+    # Extract outputs to files for the Ansible stage
+    - terraform output -raw ec2_public_ip > ../instance_ip.txt
+    - terraform output -raw aurora_cluster_endpoint > ../db_endpoint.txt
+    - terraform output -raw aurora_secret_arn > ../secret_arn.txt
+
+  artifacts:
+    paths:
+      - ${CI_PROJECT_DIR}/instance_ip.txt
+      - ${CI_PROJECT_DIR}/db_endpoint.txt
+      - ${CI_PROJECT_DIR}/secret_arn.txt
   when: manual
+
+ansible_deploy:
+  stage: ansible_deploy
+  image: python:3.11
+  needs:
+    - deploy
+  before_script:
+    - pip install ansible
+
+    # Set up SSH permissions securely
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - cp $EC2_SSH_PRIVATE_KEY ~/.ssh/id_rsa
+    - chmod 600 ~/.ssh/id_rsa
+    - eval $(ssh-agent -s)
+    - ssh-add ~/.ssh/id_rsa
+    # Disable strict host key checking for dynamic IP automation
+    - echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config
+  script:
+    # Read the Terraform outputs into variables
+    - export INSTANCE_IP=$(cat ${CI_PROJECT_DIR}/instance_ip.txt)
+    - export DB_ENDPOINT=$(cat ${CI_PROJECT_DIR}/db_endpoint.txt)
+    - export SECRET_ARN=$(cat ${CI_PROJECT_DIR}/secret_arn.txt)
+    
+    # Run the playbook, passing the dynamic IP as the inventory and passing the variables
+    - ansible-playbook -i "$INSTANCE_IP," -u ec2-user ${CI_PROJECT_DIR}/ansible/deploy-keycloak.yml --extra-vars "db_endpoint=$DB_ENDPOINT secret_arn=$SECRET_ARN"
 
 cleanup:
   stage: cleanup
