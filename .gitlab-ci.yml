@@ -3,9 +3,6 @@ workflow:
     - if: $CI_PIPELINE_SOURCE == "web"
     - when: never
 
-image:
-  name: hashicorp/terraform:1.14
-  entrypoint: [""]
 variables:
   TF_ROOT: ${CI_PROJECT_DIR}/terraform
   TF_ADDRESS: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/terraform/state/${CI_PROJECT_NAME}
@@ -23,11 +20,6 @@ cache:
   paths:
     - ${TF_ROOT}/.terraform
 
-before_script:
-  - cd ${TF_ROOT}
-  - terraform --version
-  - terraform init -input=false
-
 stages:
   - validate
   - plan
@@ -35,44 +27,48 @@ stages:
   - ansible_deploy
   - cleanup
 
+.terraform_base:
+  image:
+    name: hashicorp/terraform:1.14
+    entrypoint: [""]
+  id_tokens:
+    GITLAB_OIDC_TOKEN:
+      aud: sts.amazonaws.com  # Must match the "Audience" in your AWS OIDC Provider
+  before_script:
+    - cd ${TF_ROOT}
+    - terraform --version
+    - terraform init -input=false
+    - mkdir -p ~/.aws
+    # Convert the environment variable token into a file
+    - echo "${GITLAB_OIDC_TOKEN}" > /tmp/web_identity_token
+    # with the env variable AWS_ROLE_ARN and AWS_WEB_IDENTITY_TOKEN_FILE, the AWS Provider for Terraform automatically calls AssumeRoleWithWebIdentity (via AWS STS)
+    - export AWS_WEB_IDENTITY_TOKEN_FILE=/tmp/web_identity_token
+
 validate:
+  extends: .terraform_base
   stage: validate
   script:
     - terraform validate
     - terraform fmt
 
 plan:
+  extends: .terraform_base
   stage: plan
-  id_tokens:
-    GITLAB_OIDC_TOKEN:
-      aud: sts.amazonaws.com  # Must match the "Audience" in your AWS OIDC Provider
   script:
-    - mkdir -p ~/.aws
-    # Convert the environment variable token into a file
-    - echo "${GITLAB_OIDC_TOKEN}" > /tmp/web_identity_token
-    - export AWS_WEB_IDENTITY_TOKEN_FILE=/tmp/web_identity_token  
     - terraform plan -out=tfplan -input=false
   artifacts:
     paths:
       - ${TF_ROOT}/tfplan      
 
 deploy:
+  extends: .terraform_base
   stage: deploy
-  id_tokens:
-    GITLAB_OIDC_TOKEN:
-      aud: sts.amazonaws.com  # Must match the "Audience" in your AWS OIDC Provider  
   script:
-    - mkdir -p ~/.aws
-    # Convert the environment variable token into a file
-    - echo "${GITLAB_OIDC_TOKEN}" > /tmp/web_identity_token
-    - export AWS_WEB_IDENTITY_TOKEN_FILE=/tmp/web_identity_token  
     - terraform apply -input=false -auto-approve tfplan
-
     # Extract outputs to files for the Ansible stage
     - terraform output -raw ec2_public_ip > ../instance_ip.txt
     - terraform output -raw aurora_cluster_endpoint > ../db_endpoint.txt
     - terraform output -raw aurora_secret_arn > ../secret_arn.txt
-
   artifacts:
     paths:
       - ${CI_PROJECT_DIR}/instance_ip.txt
@@ -107,14 +103,8 @@ ansible_deploy:
     - ansible-playbook -i "$INSTANCE_IP," -u ec2-user ${CI_PROJECT_DIR}/ansible/deploy-keycloak.yml --extra-vars "db_endpoint=$DB_ENDPOINT secret_arn=$SECRET_ARN"
 
 cleanup:
+  extends: .terraform_base
   stage: cleanup
-  id_tokens:
-    GITLAB_OIDC_TOKEN:
-      aud: sts.amazonaws.com  # Must match the "Audience" in your AWS OIDC Provider  
   script:
-    - mkdir -p ~/.aws
-    # Convert the environment variable token into a file
-    - echo "${GITLAB_OIDC_TOKEN}" > /tmp/web_identity_token
-    - export AWS_WEB_IDENTITY_TOKEN_FILE=/tmp/web_identity_token  
     - terraform destroy -auto-approve
   when: manual
