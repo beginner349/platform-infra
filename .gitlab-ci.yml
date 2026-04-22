@@ -66,9 +66,9 @@ deploy:
   script:
     - terraform apply -input=false -auto-approve tfplan
     
-    - echo "INSTANCE_IP=$(terraform output -raw ec2_public_ip)" >> ansible.env
-    - echo "DB_ENDPOINT=$(terraform output -raw aurora_cluster_endpoint)" >> ansible.env
-    - echo "SECRET_ARN=$(terraform output -raw aurora_secret_arn)" >> ansible.env
+    - echo "INSTANCE_IP=$(terraform output -raw ec2_public_ip)" >> ${CI_PROJECT_DIR}/ansible.env
+    - echo "DB_ENDPOINT=$(terraform output -raw aurora_cluster_endpoint)" >> ${CI_PROJECT_DIR}/ansible.env
+    - echo "SECRET_ARN=$(terraform output -raw aurora_secret_arn)" >> ${CI_PROJECT_DIR}/ansible.env
   artifacts:
     reports:
       dotenv: ansible.env
