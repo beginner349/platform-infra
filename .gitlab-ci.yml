@@ -65,15 +65,13 @@ deploy:
   stage: deploy
   script:
     - terraform apply -input=false -auto-approve tfplan
-    # Extract outputs to files for the Ansible stage
-    - terraform output -raw ec2_public_ip > ../instance_ip.txt
-    - terraform output -raw aurora_cluster_endpoint > ../db_endpoint.txt
-    - terraform output -raw aurora_secret_arn > ../secret_arn.txt
+    
+    - echo "INSTANCE_IP=$(terraform output -raw ec2_public_ip)" >> ansible.env
+    - echo "DB_ENDPOINT=$(terraform output -raw aurora_cluster_endpoint)" >> ansible.env
+    - echo "SECRET_ARN=$(terraform output -raw aurora_secret_arn)" >> ansible.env
   artifacts:
-    paths:
-      - ${CI_PROJECT_DIR}/instance_ip.txt
-      - ${CI_PROJECT_DIR}/db_endpoint.txt
-      - ${CI_PROJECT_DIR}/secret_arn.txt
+    reports:
+      dotenv: ansible.env
   when: manual
 
 ansible_deploy:
@@ -85,20 +83,22 @@ ansible_deploy:
     - pip install ansible
 
     # Set up SSH permissions securely
+    # Ensures the SSH config directory exists, -p avoids errors if it already exists
     - mkdir -p ~/.ssh
+    # Required by SSH for security, Only the owner can read/write/execute
     - chmod 700 ~/.ssh
+    # Copies your injected CI variable into a file
     - cp $EC2_SSH_PRIVATE_KEY ~/.ssh/id_rsa
+    # SSH will refuse to use the key if permissions are too open, Only owner can read/write
     - chmod 600 ~/.ssh/id_rsa
+    # Starts an SSH agent process, Allows keys to be loaded into memory instead of referencing files directly
     - eval $(ssh-agent -s)
+    # Loads your private key into the agent, From this point, SSH (and Ansible) can use it automatically
     - ssh-add ~/.ssh/id_rsa
     # Disable strict host key checking for dynamic IP automation
+    # Prevents prompts like: Are you sure you want to continue connecting (yes/no)?
     - echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config
   script:
-    # Read the Terraform outputs into variables
-    - export INSTANCE_IP=$(cat ${CI_PROJECT_DIR}/instance_ip.txt)
-    - export DB_ENDPOINT=$(cat ${CI_PROJECT_DIR}/db_endpoint.txt)
-    - export SECRET_ARN=$(cat ${CI_PROJECT_DIR}/secret_arn.txt)
-    
     # Run the playbook, passing the dynamic IP as the inventory and passing the variables
     - ansible-playbook -i "$INSTANCE_IP," -u ec2-user ${CI_PROJECT_DIR}/ansible/deploy-keycloak.yml --extra-vars "db_endpoint=$DB_ENDPOINT secret_arn=$SECRET_ARN"
 

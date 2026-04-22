@@ -29,7 +29,7 @@
         -e KC_DB=postgres
         -e KC_DB_URL=jdbc:postgresql://{{ db_endpoint }}:5432/keycloak
         -e KC_DB_USERNAME=postgres
-        -e KC_DB_PASSWORD="{{ db_password.stdout }}"
+        -e KC_DB_PASSWORD={{ db_password.stdout | quote }}
         -e KEYCLOAK_ADMIN=admin
         -e KEYCLOAK_ADMIN_PASSWORD=password
         quay.io/keycloak/keycloak:26.6.1 start-dev
