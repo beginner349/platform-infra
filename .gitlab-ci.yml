@@ -14,11 +14,15 @@ variables:
   TF_HTTP_LOCK_METHOD: "POST"
   TF_HTTP_UNLOCK_METHOD: "DELETE"
   TF_HTTP_RETRY_WAIT_MIN: 5
+  TF_PLUGIN_CACHE_DIR: "$CI_PROJECT_DIR/.terraform.d/plugin-cache"
 
 cache:
-  key: terraform-cache-${CI_COMMIT_REF_SLUG}
+  key:
+    files:
+      - terraform/.terraform.lock.hcl
   paths:
-    - ${TF_ROOT}/.terraform
+    - terraform/.terraform
+    - .terraform.d/plugin-cache/
 
 stages:
   - validate
@@ -35,6 +39,7 @@ stages:
     GITLAB_OIDC_TOKEN:
       aud: sts.amazonaws.com  # Must match the "Audience" in your AWS OIDC Provider
   before_script:
+    - mkdir -p $TF_PLUGIN_CACHE_DIR
     - cd ${TF_ROOT}
     - terraform --version
     - terraform init -input=false
