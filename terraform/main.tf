@@ -208,6 +208,19 @@ locals {
   }
 }
 
+# 3. Create the DNS Alias record pointing to the ALB
+resource "aws_route53_record" "alias_record_alb" {
+  zone_id = data.aws_route53_zone.main.zone_id
+  name    = "auth.beginner349.com" # Replace with your subdomain
+  type    = "A"
+
+  alias {
+    name                   = aws_lb.main_alb.dns_name
+    zone_id                = aws_lb.main_alb.zone_id
+    evaluate_target_health = true
+  }
+}
+
 # Security Group for Aurora Postgres (Allow inbound traffic strictly from the EC2 SG)
 resource "aws_security_group" "aurora_sg" {
   name   = "aurora-postgres-sg"
