@@ -33,7 +33,7 @@
         -e KEYCLOAK_ADMIN=admin
         -e KEYCLOAK_ADMIN_PASSWORD=password
         -e KC_PROXY_HEADERS=xforwarded
-        -e KC_HOSTNAME=auth.beginner349.com
+        -e KC_HOSTNAME=https://auth.beginner349.com
         -e KC_HTTP_ENABLED=true
         quay.io/keycloak/keycloak:26.6.1 start
       args:
