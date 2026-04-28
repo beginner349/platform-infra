@@ -30,12 +30,22 @@ resource "aws_security_group" "alb_sg" {
   tags = local.tags
 }
 
-resource "aws_vpc_security_group_ingress_rule" "allow_tcp_traffic_ipv4" {
+resource "aws_vpc_security_group_ingress_rule" "allow_http_traffic_ipv4" {
   security_group_id = aws_security_group.alb_sg.id
   cidr_ipv4         = "0.0.0.0/0"
   from_port         = 80
   ip_protocol       = "tcp"
   to_port           = 80
+
+  tags = local.tags
+}
+
+resource "aws_vpc_security_group_ingress_rule" "allow_https_traffic_ipv4" {
+  security_group_id = aws_security_group.alb_sg.id
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 443
+  ip_protocol       = "tcp"
+  to_port           = 443
 
   tags = local.tags
 }
