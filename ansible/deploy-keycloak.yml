@@ -32,6 +32,9 @@
         -e KC_DB_PASSWORD={{ db_password.stdout | quote }}
         -e KEYCLOAK_ADMIN=admin
         -e KEYCLOAK_ADMIN_PASSWORD=password
-        quay.io/keycloak/keycloak:26.6.1 start-dev
+        -e KC_PROXY_HEADERS=xforwarded
+        -e KC_HOSTNAME=auth.beginner349.com
+        -e KC_HTTP_ENABLED=true
+        quay.io/keycloak/keycloak:26.6.1 start
       args:
         creates: /var/lib/docker/containers/keycloak # Basic idempotency check

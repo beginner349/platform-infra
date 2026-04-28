@@ -9,6 +9,19 @@ data "aws_availability_zones" "available" {
   }
 }
 
+# This "looks up" the certificate you created manually
+data "aws_acm_certificate" "auth_cert" {
+  domain   = "auth.beginner349.com"
+  statuses = ["ISSUED"]
+  types    = ["AMAZON_ISSUED"]
+}
+
+# 1. Fetch your existing Route 53 Hosted Zone
+data "aws_route53_zone" "main" {
+  name         = "beginner349.com"
+  private_zone = false
+}
+
 # Security Group for ALB (Allow HTTP)
 resource "aws_security_group" "alb_sg" {
   name   = "alb-sg"
@@ -146,16 +159,35 @@ resource "aws_lb_target_group" "tg" {
 }
 
 # Listener
-resource "aws_lb_listener" "front_end" {
+resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.main_alb.arn
   port              = "80"
   protocol          = "HTTP"
+
+  default_action {
+    type = "redirect"
+
+    redirect {
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
+    }
+  }
+}
+
+resource "aws_lb_listener" "https" {
+  load_balancer_arn = aws_lb.main_alb.arn
+  port              = "443"
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-2016-08"
+  certificate_arn   = data.aws_acm_certificate.auth_cert.arn
 
   default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.tg.arn
   }
 }
+
 
 # Attachment
 resource "aws_lb_target_group_attachment" "attachment" {
