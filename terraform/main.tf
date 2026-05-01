@@ -245,7 +245,7 @@ resource "aws_ecs_task_definition" "keycloak_task_definition" {
     # Securely inject the password from Secrets Manager [6]
     secrets = [{
       name      = "KC_DB_PASSWORD"
-      valueFrom = "${aws_rds_cluster.aurora_cluster.master_user_secret.secret_arn}:password::"
+      valueFrom = "${aws_rds_cluster.aurora_cluster.master_user_secret[0].secret_arn}:password::"
     }]
     command = ["start"]
   }])
