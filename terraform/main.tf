@@ -66,7 +66,7 @@ resource "aws_vpc_security_group_egress_rule" "allow_all_traffic_ipv4_alb" {
   tags = local.tags
 }
 
-# Security Group for EC2 (Allow traffic from ALB)
+# Security Group for ECS (Allow traffic from ALB)
 resource "aws_security_group" "ecs_sg" {
   name   = "ecs-tasks-sg"
   vpc_id = module.vpc.vpc_id
@@ -106,7 +106,7 @@ resource "aws_vpc_security_group_egress_rule" "allow_all_traffic_ipv4_ecs" {
 ### 3. IDENTITY AND ACCESS MANAGEMENT (IAM)
 ### ------------------------------------------------------------------------------
 
-# Grants the EC2 instance an identity to interact with AWS services
+# Grants the ECS instance an identity to interact with AWS services
 resource "aws_iam_role" "ecs_task_execution_role" {
   name = "ecs-task-execution-role"
   assume_role_policy = jsonencode({
@@ -121,7 +121,7 @@ resource "aws_iam_role" "ecs_task_execution_role" {
 
 # Specific permission for Keycloak to retrieve its DB password securely from Secrets Manager
 resource "aws_iam_policy" "ecs_secrets_policy" {
-  name = "ec2-secrets-policy"
+  name = "ecs-secrets-policy"
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -148,7 +148,7 @@ resource "aws_iam_role_policy_attachment" "ecs_secrets_attach" {
 ### 4. DATABASE (AURORA SERVERLESS V2)
 ### ------------------------------------------------------------------------------
 
-# Security Group for Aurora Postgres (Allow inbound traffic strictly from the EC2 SG)
+# Security Group for Aurora Postgres (Allow inbound traffic strictly from the ECS SG)
 resource "aws_security_group" "aurora_sg" {
   name   = "aurora-postgres-sg"
   vpc_id = module.vpc.vpc_id

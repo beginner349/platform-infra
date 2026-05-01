@@ -29,7 +29,7 @@ stages:
   - validate
   - plan
   - deploy
-  - ansible_deploy
+  # - ansible_deploy
   - cleanup
 
 .terraform_base:
