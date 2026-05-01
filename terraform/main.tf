@@ -26,11 +26,6 @@ data "aws_route53_zone" "main" {
   private_zone = false
 }
 
-# Latest Amazon Linux 2023 AMI for the Keycloak host
-data "aws_ssm_parameter" "al2023_latest" {
-  name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
-}
-
 ### ------------------------------------------------------------------------------
 ### 2. SECURITY GROUPS (NETWORK FIREWALLS)
 ### ------------------------------------------------------------------------------
@@ -71,36 +66,26 @@ resource "aws_vpc_security_group_egress_rule" "allow_all_traffic_ipv4_alb" {
   tags = local.tags
 }
 
-# Security Group for EC2 (Allow traffic from ALB and SSH)
-resource "aws_security_group" "ec2_sg" {
-  name   = "ec2-sg"
+# Security Group for EC2 (Allow traffic from ALB)
+resource "aws_security_group" "ecs_sg" {
+  name   = "ecs-tasks-sg"
   vpc_id = module.vpc.vpc_id
 
   tags = local.tags
 }
 
 resource "aws_vpc_security_group_ingress_rule" "allow_tcp_traffic_ipv4_from_alb" {
-  security_group_id            = aws_security_group.ec2_sg.id
-  from_port                    = 80
+  security_group_id            = aws_security_group.ecs_sg.id
+  from_port                    = 8080
   ip_protocol                  = "tcp"
-  to_port                      = 80
+  to_port                      = 8080
   referenced_security_group_id = aws_security_group.alb_sg.id
 
   tags = local.tags
 }
 
-resource "aws_vpc_security_group_ingress_rule" "allow_ssh_traffic_ipv4" {
-  security_group_id = aws_security_group.ec2_sg.id
-  cidr_ipv4         = "0.0.0.0/0"
-  from_port         = 22
-  ip_protocol       = "tcp"
-  to_port           = 22
-
-  tags = local.tags
-}
-
-resource "aws_vpc_security_group_egress_rule" "allow_all_traffic_ipv4_ec2" {
-  security_group_id = aws_security_group.ec2_sg.id
+resource "aws_vpc_security_group_egress_rule" "allow_all_traffic_ipv4_ecs" {
+  security_group_id = aws_security_group.ecs_sg.id
   cidr_ipv4         = "0.0.0.0/0"
   ip_protocol       = "-1" # semantically equivalent to all ports
 
@@ -112,20 +97,20 @@ resource "aws_vpc_security_group_egress_rule" "allow_all_traffic_ipv4_ec2" {
 ### ------------------------------------------------------------------------------
 
 # Grants the EC2 instance an identity to interact with AWS services
-resource "aws_iam_role" "ec2_secrets_role" {
-  name = "ec2-secrets-role"
+resource "aws_iam_role" "ecs_task_execution_role" {
+  name = "ecs-task-execution-role"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
       Action    = "sts:AssumeRole"
       Effect    = "Allow"
-      Principal = { Service = "ec2.amazonaws.com" }
+      Principal = { Service = "ecs-tasks.amazonaws.com" }
     }]
   })
 }
 
 # Specific permission for Keycloak to retrieve its DB password securely from Secrets Manager
-resource "aws_iam_policy" "ec2_secrets_policy" {
+resource "aws_iam_policy" "ecs_secrets_policy" {
   name = "ec2-secrets-policy"
   policy = jsonencode({
     Version = "2012-10-17"
@@ -138,15 +123,15 @@ resource "aws_iam_policy" "ec2_secrets_policy" {
   })
 }
 
-resource "aws_iam_role_policy_attachment" "ec2_secrets_attach" {
-  role       = aws_iam_role.ec2_secrets_role.name
-  policy_arn = aws_iam_policy.ec2_secrets_policy.arn
+# Attach the standard Amazon ECS Execution Role policy
+resource "aws_iam_role_policy_attachment" "ecs_execution_attach" {
+  role       = aws_iam_role.ecs_task_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
-# Container for the role that is assigned to the EC2 instance resource
-resource "aws_iam_instance_profile" "ec2_profile" {
-  name = "ec2-profile"
-  role = aws_iam_role.ec2_secrets_role.name
+resource "aws_iam_role_policy_attachment" "ecs_secrets_attach" {
+  role       = aws_iam_role.ecs_task_execution_role.name
+  policy_arn = aws_iam_policy.ecs_secrets_policy.arn
 }
 
 ### ------------------------------------------------------------------------------
@@ -161,12 +146,12 @@ resource "aws_security_group" "aurora_sg" {
   tags = local.tags
 }
 
-resource "aws_vpc_security_group_ingress_rule" "allow_tcp_traffic_from_ec2" {
+resource "aws_vpc_security_group_ingress_rule" "allow_tcp_traffic_from_ecs" {
   security_group_id            = aws_security_group.aurora_sg.id
   from_port                    = 5432
   ip_protocol                  = "tcp"
   to_port                      = 5432
-  referenced_security_group_id = aws_security_group.ec2_sg.id
+  referenced_security_group_id = aws_security_group.ecs_sg.id
 
   tags = local.tags
 }
@@ -231,18 +216,58 @@ resource "aws_rds_cluster_instance" "aurora_instances" {
 ### 5. COMPUTE AND NETWORKING
 ### ------------------------------------------------------------------------------
 
-resource "aws_instance" "web_server" {
-  ami                    = data.aws_ssm_parameter.al2023_latest.value
-  instance_type          = "m7i.large"
-  key_name               = "ec2-key-pair"
-  vpc_security_group_ids = [aws_security_group.ec2_sg.id]
-  subnet_id              = module.vpc.public_subnets[0]
-
-  associate_public_ip_address = true
-
-  iam_instance_profile = aws_iam_instance_profile.ec2_profile.name
-
+resource "aws_ecs_cluster" "keycloak_ecs_cluster" {
+  name = "keycloak-ecs-cluster"
   tags = local.tags
+}
+
+resource "aws_ecs_task_definition" "keycloak_task_definition" {
+  family                   = "keycloak-task-definition"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = "1024"
+  memory                   = "2048"
+  execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
+
+  container_definitions = jsonencode([{
+    name      = "keycloak"
+    image     = "quay.io/keycloak/keycloak:26.6.1"
+    essential = true
+    portMappings = [{ containerPort = 8080, hostPort = 8080 }]
+    environment = [
+      { name = "KC_DB", value = "postgres" },
+      { name = "KC_DB_URL", value = "jdbc:postgresql://${aws_rds_cluster.aurora_cluster.endpoint}:5432/keycloak" },
+      { name = "KC_DB_USERNAME", value = "postgres" },
+      { name = "KC_HOSTNAME", value = "https://auth.beginner349.com" },
+      { name = "KC_PROXY_HEADERS", value = "xforwarded" },
+      { name = "KC_HTTP_ENABLED", value = "true" }
+    ]
+    # Securely inject the password from Secrets Manager [6]
+    secrets = [{
+      name      = "KC_DB_PASSWORD"
+      valueFrom = "${aws_rds_cluster.aurora_cluster.master_user_secret.secret_arn}:password::"
+    }]
+    command = ["start"]
+  }])
+}
+
+resource "aws_ecs_service" "keycloak_ecs_service" {
+  name            = "keycloak-ecs-service"
+  cluster         = aws_ecs_cluster.keycloak_ecs_cluster.id
+  task_definition = aws_ecs_task_definition.keycloak_task_definition.arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    subnets         = module.vpc.private_subnets
+    security_groups = [aws_security_group.ecs_sg.id]
+  }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.tg.arn
+    container_name   = "keycloak"
+    container_port   = 8080
+  }
 }
 
 # Application Load Balancer
@@ -257,9 +282,10 @@ resource "aws_lb" "main_alb" {
 # Target Group
 resource "aws_lb_target_group" "tg" {
   name     = "main-tg"
-  port     = 80
+  port     = 8080
   protocol = "HTTP"
   vpc_id   = module.vpc.vpc_id
+  target_type = "ip"
 }
 
 # Listener
@@ -290,13 +316,6 @@ resource "aws_lb_listener" "https" {
     type             = "forward"
     target_group_arn = aws_lb_target_group.tg.arn
   }
-}
-
-# Attachment
-resource "aws_lb_target_group_attachment" "attachment" {
-  target_group_arn = aws_lb_target_group.tg.arn
-  target_id        = aws_instance.web_server.id
-  port             = 80
 }
 
 # Points the custom domain to the ALB via an Alias record

@@ -1,7 +1,8 @@
 workflow:
   rules:
-    - if: $CI_PIPELINE_SOURCE == "web"
-    - when: never
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
 variables:
   TF_ROOT: ${CI_PROJECT_DIR}/terraform
@@ -71,7 +72,7 @@ deploy:
   script:
     - terraform apply -input=false -auto-approve tfplan
     
-    - echo "INSTANCE_IP=$(terraform output -raw ec2_public_ip)" >> ${CI_PROJECT_DIR}/ansible.env
+    # - echo "INSTANCE_IP=$(terraform output -raw ec2_public_ip)" >> ${CI_PROJECT_DIR}/ansible.env
     - echo "DB_ENDPOINT=$(terraform output -raw aurora_cluster_endpoint)" >> ${CI_PROJECT_DIR}/ansible.env
     - echo "SECRET_ARN=$(terraform output -raw aurora_secret_arn)" >> ${CI_PROJECT_DIR}/ansible.env
   artifacts:
@@ -79,7 +80,7 @@ deploy:
       dotenv: ansible.env
   when: manual
 
-ansible_deploy:
+.ansible_deploy:
   stage: ansible_deploy
   image: python:3.11
   needs:
