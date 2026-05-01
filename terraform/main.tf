@@ -74,7 +74,8 @@ resource "aws_security_group" "ecs_sg" {
   tags = local.tags
 }
 
-resource "aws_vpc_security_group_ingress_rule" "allow_tcp_traffic_ipv4_from_alb" {
+# Allow application traffic
+resource "aws_vpc_security_group_ingress_rule" "allow_8080" {
   security_group_id            = aws_security_group.ecs_sg.id
   from_port                    = 8080
   ip_protocol                  = "tcp"
@@ -82,6 +83,15 @@ resource "aws_vpc_security_group_ingress_rule" "allow_tcp_traffic_ipv4_from_alb"
   referenced_security_group_id = aws_security_group.alb_sg.id
 
   tags = local.tags
+}
+
+# Allow health check traffic on the management port
+resource "aws_vpc_security_group_ingress_rule" "allow_9000_health" {
+  security_group_id            = aws_security_group.ecs_sg.id
+  from_port                    = 9000
+  to_port                      = 9000
+  ip_protocol                  = "tcp"
+  referenced_security_group_id = aws_security_group.alb_sg.id
 }
 
 resource "aws_vpc_security_group_egress_rule" "allow_all_traffic_ipv4_ecs" {
@@ -178,7 +188,7 @@ resource "aws_rds_cluster" "aurora_cluster" {
   database_name      = "keycloak"
   master_username    = "postgres"
 
-    # Automatically manages the password in Secrets Manager
+  # Automatically manages the password in Secrets Manager
   manage_master_user_password = true
 
   db_subnet_group_name   = aws_db_subnet_group.aurora_subnet_group.name
@@ -233,14 +243,20 @@ resource "aws_ecs_task_definition" "keycloak_task_definition" {
     name      = "keycloak"
     image     = "quay.io/keycloak/keycloak:26.6.1"
     essential = true
-    portMappings = [{ containerPort = 8080, hostPort = 8080 }]
+    portMappings = [
+      { containerPort = 8080, hostPort = 8080 }, # Application
+      { containerPort = 9000, hostPort = 9000 }  # Management (Health)
+    ]
     environment = [
       { name = "KC_DB", value = "postgres" },
       { name = "KC_DB_URL", value = "jdbc:postgresql://${aws_rds_cluster.aurora_cluster.endpoint}:5432/keycloak" },
       { name = "KC_DB_USERNAME", value = "postgres" },
       { name = "KC_HOSTNAME", value = "https://auth.beginner349.com" },
       { name = "KC_PROXY_HEADERS", value = "xforwarded" },
-      { name = "KC_HTTP_ENABLED", value = "true" }
+      { name = "KC_HTTP_ENABLED", value = "true" },
+      { name = "KC_BOOTSTRAP_ADMIN_USERNAME", value = "admin" },
+      { name = "KC_BOOTSTRAP_ADMIN_PASSWORD", value = "password" },
+      { name = "KC_HEALTH_ENABLED", value = "true" }
     ]
     # Securely inject the password from Secrets Manager [6]
     secrets = [{
@@ -281,11 +297,16 @@ resource "aws_lb" "main_alb" {
 
 # Target Group
 resource "aws_lb_target_group" "tg" {
-  name     = "main-tg"
-  port     = 8080
-  protocol = "HTTP"
-  vpc_id   = module.vpc.vpc_id
+  name        = "main-tg"
+  port        = 8080
+  protocol    = "HTTP"
+  vpc_id      = module.vpc.vpc_id
   target_type = "ip"
+
+  health_check {
+    port = "9000"         # Explicitly use the management port
+    path = "/health/live" # Default health path
+  }
 }
 
 # Listener
