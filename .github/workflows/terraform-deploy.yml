@@ -28,11 +28,11 @@ jobs:
       uses: aws-actions/configure-aws-credentials@v4
       with:
         role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-        aws-region: ap-southeast-1
+        aws-region: ${{ vars.AWS_DEFAULT_REGION }}
 
     # Install the latest version of Terraform CLI and configure the Terraform CLI configuration file with a Terraform Cloud user API token
     - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v1
+      uses: hashicorp/setup-terraform@v4
       with:
         terraform_version: 1.14.7
 
@@ -67,10 +67,12 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ap-southeast-1
+          aws-region: ${{ vars.AWS_DEFAULT_REGION }}
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.14.7
 
       - name: Terraform Init
         run: terraform init
