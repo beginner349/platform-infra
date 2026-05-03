@@ -3,6 +3,7 @@ name: 'Terraform Deploy'
 on:
   push:
     branches: [ "master" ]
+  workflow_dispatch:
 
 permissions:
   id-token: write # Required for requesting the JWT for OIDC
