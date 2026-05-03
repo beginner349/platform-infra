@@ -1,4 +1,4 @@
-name: 'Terraform'
+name: 'Terraform Deploy'
 
 on:
   push:
@@ -15,7 +15,9 @@ jobs:
     defaults:
       run:
         working-directory: ./terraform
-    
+    env:
+      TF_VAR_AWS_ROLE_NAME: ${{ vars.AWS_ROLE_NAME }}
+
     steps:
     # Checkout the repository to the GitHub Actions runner
     - name: Checkout
@@ -53,6 +55,8 @@ jobs:
     defaults:
       run:
         working-directory: ./terraform
+    env:
+      TF_VAR_AWS_ROLE_NAME: ${{ vars.AWS_ROLE_NAME }}
     
     steps:
       - name: Checkout
