@@ -1,3 +1,11 @@
+##### ------------------------------------------------------------------------------
+##### 0. VARIABLES
+##### ------------------------------------------------------------------------------
+variable "domain_name" {
+  type        = string
+  description = "The root domain name (e.g., beginner349.com)"
+}
+
 ### ------------------------------------------------------------------------------
 ### 1. PROVIDER AND DATA SOURCES
 ### ------------------------------------------------------------------------------
@@ -15,14 +23,14 @@ data "aws_availability_zones" "available" {
 
 # Locates the SSL certificate for HTTPS termination on the ALB
 data "aws_acm_certificate" "auth_cert" {
-  domain   = "auth.beginner349.com"
+  domain   = "auth.${var.domain_name}"
   statuses = ["ISSUED"]
   types    = ["AMAZON_ISSUED"]
 }
 
 # Fetches the public DNS zone for record creation
 data "aws_route53_zone" "main" {
-  name         = "beginner349.com"
+  name         = var.domain_name
   private_zone = false
 }
 
@@ -251,7 +259,7 @@ resource "aws_ecs_task_definition" "keycloak_task_definition" {
       { name = "KC_DB", value = "postgres" },
       { name = "KC_DB_URL", value = "jdbc:postgresql://${aws_rds_cluster.aurora_cluster.endpoint}:5432/keycloak" },
       { name = "KC_DB_USERNAME", value = "postgres" },
-      { name = "KC_HOSTNAME", value = "https://auth.beginner349.com" },
+      { name = "KC_HOSTNAME", value = "https://auth.${var.domain_name}" },
       { name = "KC_PROXY_HEADERS", value = "xforwarded" },
       { name = "KC_HTTP_ENABLED", value = "true" },
       { name = "KC_BOOTSTRAP_ADMIN_USERNAME", value = "admin" },
@@ -342,7 +350,7 @@ resource "aws_lb_listener" "https" {
 # Points the custom domain to the ALB via an Alias record
 resource "aws_route53_record" "alias_record_alb" {
   zone_id = data.aws_route53_zone.main.zone_id
-  name    = "auth.beginner349.com" # Replace with your subdomain
+  name    = "auth.${var.domain_name}" # Replace with your subdomain
   type    = "A"
 
   alias {
