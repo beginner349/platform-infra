@@ -1,5 +1,7 @@
 # Infrastructure Project: Secure Keycloak Deployment on AWS
 
+[![Terraform Deploy](https://github.com/beginner349/platform-infra/actions/workflows/terraform-deploy.yml/badge.svg)](https://github.com/beginner349/platform-infra/actions/workflows/terraform-deploy.yml)
+
 ## Project Overview
 
 This project automates the provisioning of a secure, production-ready infrastructure for **Keycloak**. 
