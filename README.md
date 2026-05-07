@@ -4,6 +4,71 @@
 
 ## Project Overview
 
+ ```mermaid
+flowchart TD
+  subgraph Internet
+    User((User))
+  end
+
+  subgraph AWS_Cloud ["AWS Cloud (ap-southeast-1)"]
+    route-53[Route 53: auth.beginner349.com]
+    dynamodb[(AWS DynamoDB)]
+    secrets[AWS Secrets Manager]
+    acm[AWS Certificate Manager]
+    s3[("S3 Backend (State Locking Enabled)")]    
+
+    subgraph VPC ["Custom VPC (10.0.0.0/16)"]
+        subgraph Public_Subnets ["Public Subnets"]
+          subgraph keycloak-alb[Application Load Balancer: keycloak]
+              P80[Port 80: HTTP]
+              P443[Port 443: HTTPS]
+          end 
+          spring-boot-alb[Application Load Balancer: spring boot]
+        end
+
+        subgraph Private_Subnets ["Private Subnets"]
+            subgraph EKS_Cluster ["Amazon EKS (Auto Mode)"]
+                app[Spring Boot App: beginner349-app]
+            end
+            
+            subgraph ECS_Fargate ["Amazon ECS Fargate"]
+                keycloak[Keycloak Container]
+            end
+        end
+
+        subgraph DB_Subnets ["Database Subnets"]
+            aurora[(Aurora Serverless v2)]
+        end
+    end
+  end
+
+  subgraph CI_CD ["CI/CD Pipeline (GitOps)"]
+      GHA[GitHub Actions]
+      OIDC[OIDC Authentication]
+      TF[Terraform]
+  end
+
+  %% Traffic Flow
+  User --> route-53
+  route-53 --> keycloak-alb
+  P80 -- "301 Redirect" --> P443
+  acm -- "SSL Certificate" --> P443
+  P443 -- "Decrypted Traffic (SSL Termination)" --> keycloak    
+
+  spring-boot-alb -- Port 80 --> app
+
+  %% Infrastructure Management
+  GHA --> TF
+  TF -- "use_lockfile = true" --> s3
+  TF --> OIDC
+  OIDC -- "Deploy & Provision" --> AWS_Cloud
+
+  %% Persistence
+  app --> dynamodb
+  keycloak --> aurora
+  secrets o--o aurora
+```
+
 This project automates the provisioning of a secure, production-ready infrastructure for **Keycloak**. 
 The architecture includes a **VPC** with public and private subnets, an **Application Load Balancer (ALB)** handling HTTPS traffic with an Amazon-issued certificate, and **ECS Fargate**.
 Data is persisted in an **Amazon Aurora PostgreSQL Serverless v2** cluster, with credentials securely managed by **AWS Secrets Manager**. 
