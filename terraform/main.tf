@@ -14,6 +14,10 @@ provider "aws" {
   region = local.region
 }
 
+provider "tls" {
+  # Configuration options
+}
+
 data "aws_availability_zones" "available" {
   filter {
     name   = "opt-in-status"
@@ -370,6 +374,8 @@ locals {
   vpc_cidr = "10.0.0.0/16"
   azs      = slice(data.aws_availability_zones.available.names, 0, 3)
 
+  oidc_url = replace(aws_iam_openid_connect_provider.eks_oidc_provider.url, "https://", "")
+
   tags = {
     Environment = "dev"
     Terraform   = "true"
@@ -523,4 +529,44 @@ resource "aws_iam_role_policy_attachment" "node_AmazonEKSWorkerNodeMinimalPolicy
 resource "aws_iam_role_policy_attachment" "node_AmazonEC2ContainerRegistryPullOnly" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPullOnly"
   role       = aws_iam_role.node.name
+}
+
+data "tls_certificate" "eks_tls_cert" {
+  url = aws_eks_cluster.my-eks-cluster.identity[0].oidc[0].issuer
+}
+
+resource "aws_iam_openid_connect_provider" "eks_oidc_provider" {
+  url = aws_eks_cluster.my-eks-cluster.identity[0].oidc[0].issuer
+
+  client_id_list = ["sts.amazonaws.com"]
+
+  thumbprint_list = [data.tls_certificate.eks_tls_cert.certificates[0].sha1_fingerprint]
+}
+
+resource "aws_iam_role" "eks_service_iam_role" {
+  name = "eks-service-iam-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRoleWithWebIdentity"
+        Effect = "Allow"
+        Principal = {
+          Federated = aws_iam_openid_connect_provider.eks_oidc_provider.arn
+        }
+        Condition = {
+          StringEquals = {
+            "${local.oidc_url}:aud" = "sts.amazonaws.com"
+            "${local.oidc_url}:sub" = "system:serviceaccount:beginner349-dev:beginner349-sa"
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "role_policy_attach" {
+  role       = aws_iam_role.eks_service_iam_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonDynamoDBReadOnlyAccess"
 }
