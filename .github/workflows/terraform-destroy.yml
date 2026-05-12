@@ -17,7 +17,10 @@ jobs:
     env:
       TF_VAR_domain_name: ${{ vars.DOMAIN_NAME }}
       TF_VAR_AWS_ROLE_NAME: ${{ vars.AWS_ROLE_NAME }}
-    
+      TF_VAR_keycloak_image_tag: ${{ vars.KEYCLOAK_IMAGE_TAG }}
+      TF_VAR_AWS_ECR: ${{ vars.AWS_ECR }}
+      TF_VAR_region: ${{ vars.AWS_DEFAULT_REGION }}    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
