@@ -1,17 +1,10 @@
-##### ------------------------------------------------------------------------------
-##### 0. VARIABLES
-##### ------------------------------------------------------------------------------
-variable "domain_name" {
-  type        = string
-  description = "The root domain name (e.g., beginner349.com)"
-}
 
 ### ------------------------------------------------------------------------------
 ### 1. PROVIDER AND DATA SOURCES
 ### ------------------------------------------------------------------------------
 
 provider "aws" {
-  region = local.region
+  region = var.region
 }
 
 provider "tls" {
@@ -243,6 +236,48 @@ resource "aws_ecs_cluster" "keycloak_ecs_cluster" {
   tags = local.tags
 }
 
+resource "aws_ecs_task_definition" "keycloak_realm_import" {
+  family                   = "keycloak-realm-import"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = "1024"
+  memory                   = "2048"
+  execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
+
+  container_definitions = jsonencode([{
+    name      = "keycloak-import"
+    image     = "${var.AWS_ECR}/beginner349/keycloak:${var.keycloak_image_tag}"
+    essential = true
+
+    environment = [
+      { name = "KC_DB", value = "postgres" },
+      { name = "KC_DB_URL", value = "jdbc:postgresql://${aws_rds_cluster.aurora_cluster.endpoint}:5432/keycloak" },
+      { name = "KC_DB_USERNAME", value = "postgres" }
+    ]
+
+    # Securely inject the password from Secrets Manager [6]
+    secrets = [{
+      name      = "KC_DB_PASSWORD"
+      valueFrom = "${aws_rds_cluster.aurora_cluster.master_user_secret[0].secret_arn}:password::"
+    }]
+    command = ["import", "--dir", "/opt/keycloak/data/import"]
+
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        awslogs-group         = aws_cloudwatch_log_group.keycloak_import.name
+        awslogs-region        = var.region
+        awslogs-stream-prefix = "keycloak-realm-import"
+      }
+    }
+  }])
+}
+
+resource "aws_cloudwatch_log_group" "keycloak_import" {
+  name = "/ecs/keycloak-realm-import"
+  tags = local.tags
+}
+
 resource "aws_ecs_task_definition" "keycloak_task_definition" {
   family                   = "keycloak-task-definition"
   network_mode             = "awsvpc"
@@ -253,7 +288,7 @@ resource "aws_ecs_task_definition" "keycloak_task_definition" {
 
   container_definitions = jsonencode([{
     name      = "keycloak"
-    image     = "quay.io/keycloak/keycloak:26.6.1"
+    image     = "${var.AWS_ECR}/beginner349/keycloak:${var.keycloak_image_tag}"
     essential = true
     portMappings = [
       { containerPort = 8080, hostPort = 8080 }, # Application
@@ -369,8 +404,6 @@ resource "aws_route53_record" "alias_record_alb" {
 ### ------------------------------------------------------------------------------
 
 locals {
-  region = "ap-southeast-1"
-
   vpc_cidr = "10.0.0.0/16"
   azs      = slice(data.aws_availability_zones.available.names, 0, 3)
 

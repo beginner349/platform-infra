@@ -1,0 +1,34 @@
+{
+    "realm": "myrealm",
+    "enabled": true,
+    "clients": [
+        {
+            "clientId": "myclient",
+            "enabled": true,
+            "protocol": "openid-connect",
+            "publicClient": true,
+            "redirectUris": [
+                "https://oauth.pstmn.io/v1/browser-callback"
+            ],
+            "webOrigins": [
+                "*"
+            ],
+            "standardFlowEnabled": true,
+            "directAccessGrantsEnabled": false
+        }
+    ],
+    "users": [
+        {
+            "username": "myuser",
+            "enabled": true,
+            "email": "c.jiajun.92@gmail.com",
+            "credentials": [
+                {
+                    "type": "password",
+                    "value": "password",
+                    "temporary": false
+                }
+            ]
+        }
+    ]
+}
