@@ -76,6 +76,6 @@ Once deployed, the following outputs are available for verification:
 - [x] Setting Up OpenID Connect (OIDC) in AWS for GitHub Actions
 - [x] Configuring an S3 Remote Backend for Terraform State and Locking
 - [x] Creating Infrastructure as Code (IaC) for IAM Roles for Service Accounts (IRSA)
-- [ ] Create import files for Keycloak realms, users, and clients
+- [x] Create import files for Keycloak realms, users, and clients
 - [ ] Enable logging and monitoring in the EKS cluster
 - [ ] Implement TLS/SSL for the ingress with a custom domain using ExternalDNS and Route 53

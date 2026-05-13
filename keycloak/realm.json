@@ -21,6 +21,8 @@
         {
             "username": "myuser",
             "enabled": true,
+            "firstName": "Jiajun",
+            "lastName": "Chen",
             "email": "c.jiajun.92@gmail.com",
             "credentials": [
                 {
