@@ -260,7 +260,7 @@ resource "aws_ecs_task_definition" "keycloak_realm_import" {
       name      = "KC_DB_PASSWORD"
       valueFrom = "${aws_rds_cluster.aurora_cluster.master_user_secret[0].secret_arn}:password::"
     }]
-    command = ["import", "--dir", "/opt/keycloak/data/import"]
+    command = ["import", "--file", "/opt/keycloak/data/import/realm.json"]
 
     logConfiguration = {
       logDriver = "awslogs"
