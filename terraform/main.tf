@@ -636,7 +636,7 @@ resource "aws_iam_policy" "eso_policy" {
         "secretsmanager:GetSecretValue",
         "secretsmanager:DescribeSecret"
       ]
-      Effect = "Allow"
+      Effect   = "Allow"
       Resource = "arn:aws:secretsmanager:ap-southeast-1:542776678091:secret:dev/grafana-cloud/*"
     }]
   })
