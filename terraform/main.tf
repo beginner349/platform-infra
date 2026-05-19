@@ -603,3 +603,46 @@ resource "aws_iam_role_policy_attachment" "role_policy_attach" {
   role       = aws_iam_role.eks_service_iam_role.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonDynamoDBReadOnlyAccess"
 }
+
+resource "aws_iam_role" "eso_irsa" {
+  name = "eso-irsa"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRoleWithWebIdentity"
+        Effect = "Allow"
+        Principal = {
+          Federated = aws_iam_openid_connect_provider.eks_oidc_provider.arn
+        }
+        Condition = {
+          StringEquals = {
+            "${local.oidc_url}:aud" = "sts.amazonaws.com"
+            "${local.oidc_url}:sub" = "system:serviceaccount:external-secrets:external-secrets-sa"
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_policy" "eso_policy" {
+  name = "eso-policy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = [
+        "secretsmanager:GetSecretValue",
+        "secretsmanager:DescribeSecret"
+      ]
+      Effect = "Allow"
+      Resource = "arn:aws:secretsmanager:ap-southeast-1:542776678091:secret:dev/grafana-cloud/*"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "eso_policy_attachment" {
+  role       = aws_iam_role.eso_irsa.name
+  policy_arn = aws_iam_policy.eso_policy.arn
+}
