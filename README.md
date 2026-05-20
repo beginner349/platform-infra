@@ -26,93 +26,101 @@ This project is split across three purpose-built repositories that work together
 
 ## Project Overview
 
-  ```mermaid
-  flowchart TD
-    subgraph Repos ["GitHub Repositories"]
-      repo_infra["platform-infra\n(Terraform)"]
-      repo_app["beginner349-app\n(Spring Boot 4.0)"]
-      repo_k8s["k8s-manifests\n(Kustomize + Helm)"]
-    end
+```mermaid
+flowchart LR
+  subgraph Repos ["GitHub Repositories"]
+    repo_infra["platform-infra"]
+    repo_app["beginner349-app"]
+    repo_k8s["k8s-manifests"]
+  end
 
-    subgraph CI_CD_App ["CI/CD: Application"]
-      gha_app["GitHub Actions\nmvn build + Docker"]
-      ecr[("Amazon ECR")]
-    end
+  subgraph Pipelines ["GitHub Actions"]
+    
+    gha_tf["Terraform Apply<br/>(OIDC auth)"]
+    gha_app["Build + Docker<br/>(OIDC auth)"]
+    k8_deploy["Kubernetes deployment<br/>(OIDC auth)"]
+  end
 
-    subgraph CI_CD_Infra ["CI/CD: Infrastructure"]
-      gha_tf["GitHub Actions\nTerraform Deploy"]
-      oidc_tf["OIDC (Passwordless Auth)"]
-    end
+  subgraph AWS ["AWS (ap-southeast-1)"]
+    
+    s3[("S3<br/>TF State + Lock")]
+    ecr[("Amazon ECR")]
+    eks["EKS<br/>(workloads)"]
+  end
 
-    subgraph Grafana_Cloud ["Grafana Cloud (SaaS)"]
-      grafana["Metrics / Logs / Traces\nDashboards"]
-    end
+  repo_infra --> gha_tf
+  gha_tf -->|"terraform apply"| AWS
+  gha_tf -->|"state lock"| s3
 
-    subgraph AWS_Cloud ["AWS Cloud (ap-southeast-1)"]
-      secrets_mgr["AWS Secrets Manager\ndev/grafana-cloud/*\nAurora DB creds"]
-      dynamodb[("DynamoDB")]
-      s3[("S3 Backend\nTF State + Lock")]
-      route53["Route53\nauth.beginner349.com"]
-      acm["ACM SSL Cert"]
+  repo_app  --> gha_app
+  gha_app -->|"push image"| ecr
 
-      subgraph VPC ["Custom VPC (10.0.0.0/16)"]
-        subgraph Public ["Public Subnets"]
-          alb_kc["ALB: Keycloak\nHTTP → HTTPS redirect\nSSL Termination"]
-          alb_app["ALB: Spring Boot App"]
+  repo_k8s  -->k8_deploy
+  k8_deploy  -->|"Helm + Kustomize"| eks
+  
+  ecr -->|"pull image"| eks
+
+```
+
+```mermaid
+flowchart TD
+  subgraph Grafana_Cloud ["Grafana Cloud (SaaS)"]
+    grafana["Metrics / Logs / Traces\nDashboards"]
+  end
+
+  subgraph AWS_Cloud ["AWS Cloud (ap-southeast-1)"]
+    secrets_mgr["AWS Secrets Manager\ndev/grafana-cloud/*\nAurora DB creds"]
+    dynamodb[("DynamoDB")]      
+    route53["Route53\nauth.beginner349.com"]
+    acm["ACM SSL Cert"]
+
+    subgraph VPC ["Custom VPC (10.0.0.0/16)"]
+      subgraph Public ["Public Subnets"]
+        alb_kc["ALB: Keycloak\nHTTP → HTTPS redirect\nSSL Termination"]
+        alb_app["ALB: Spring Boot App"]
+      end
+
+      subgraph Private ["Private Subnets"]
+        subgraph EKS ["Amazon EKS (Auto Mode)"]
+          spring_boot["Spring Boot App\nOTLP → :4318"]
+          eso["External Secrets Operator\nIRSA: eso-irsa"]
+          alloy["Grafana Alloy\n(metrics / logs / traces collector)"]
+          alloy_grafana_credentials["Grafana Cloud API token\n(k8 secret)"]
         end
 
-        subgraph Private ["Private Subnets"]
-          subgraph EKS ["Amazon EKS (Auto Mode, v1.35)"]
-            spring_boot["Spring Boot App\nOTLP → :4318"]
-            eso["External Secrets Operator\nIRSA: eso-irsa"]
-            alloy["Grafana Alloy\n(metrics / logs / traces collector)"]
-          end
-
-          subgraph ECS ["ECS Fargate"]
-            keycloak["Keycloak 26.6.1\nRealm: pre-imported"]
-          end
-        end
-
-        subgraph DB ["Database Subnets"]
-          aurora[("Aurora PostgreSQL\nServerless v2\n0.5–1.0 ACUs")]
+        subgraph ECS ["ECS Fargate"]
+          keycloak["Keycloak\nRealm: pre-imported"]
         end
       end
+
+      subgraph DB ["Database Subnets"]
+        aurora[("Aurora PostgreSQL\nServerless v2")]
+      end
     end
+  end
   
-    %% Infra CI/CD
-    repo_infra --> gha_tf --> oidc_tf
-    oidc_tf -- "Terraform Apply" --> AWS_Cloud
-    gha_tf -- "State Lock" --> s3
+  %% User traffic
+  User((User)) --> route53
+  route53 --> alb_kc
+  acm -- "SSL Cert" --> alb_kc
+  alb_kc -- "Port 8080" --> keycloak
+  alb_app --> spring_boot
 
-    %% App CI/CD
-    repo_app --> gha_app
-    gha_app -- "Push image" --> ecr
-    ecr -- "Pull image" --> spring_boot
-    ecr -- "Pull image" --> keycloak
+  %% Data persistence
+  keycloak --> aurora
+  spring_boot --> dynamodb
+  secrets_mgr -- "DB password" --> keycloak
 
-    %% K8s deploy
-    repo_k8s -- "Helm + Kustomize apply" --> EKS
+  %% Secrets flow (ESO)
+  eso -- "IRSA: AssumeRoleWithWebIdentity" <--> secrets_mgr
+  eso -- "create" --> alloy_grafana_credentials
+  alloy_grafana_credentials -- "inject into" --> alloy
 
-    %% User traffic
-    User((User)) --> route53
-    route53 --> alb_kc
-    acm -- "SSL Cert" --> alb_kc
-    alb_kc -- "Port 8080" --> keycloak
-    alb_app --> spring_boot
+  %% Observability pipeline
+  spring_boot -- "OTLP HTTP :4318" --> alloy
+  alloy -- "Remote Write" --> grafana
 
-    %% Data persistence
-    keycloak --> aurora
-    spring_boot --> dynamodb
-    secrets_mgr -- "DB password" --> keycloak
-
-    %% Secrets flow (ESO)
-    eso -- "IRSA: AssumeRoleWithWebIdentity" --> secrets_mgr
-    secrets_mgr -- "Grafana API Token" --> alloy
-
-    %% Observability pipeline
-    spring_boot -- "OTLP HTTP :4318" --> alloy
-    alloy -- "Remote Write" --> grafana
-  ```
+```
 
 ---
 
