@@ -1,15 +1,7 @@
 
 ### ------------------------------------------------------------------------------
-### 1. PROVIDER AND DATA SOURCES
+### 1. DATA SOURCES
 ### ------------------------------------------------------------------------------
-
-provider "aws" {
-  region = var.region
-}
-
-provider "tls" {
-  # Configuration options
-}
 
 data "aws_availability_zones" "available" {
   filter {
@@ -30,6 +22,8 @@ data "aws_route53_zone" "main" {
   name         = var.domain_name
   private_zone = false
 }
+
+data "aws_caller_identity" "current" {}
 
 ### ------------------------------------------------------------------------------
 ### 2. SECURITY GROUPS (NETWORK FIREWALLS)
@@ -410,7 +404,7 @@ locals {
   oidc_url = replace(aws_iam_openid_connect_provider.eks_oidc_provider.url, "https://", "")
 
   tags = {
-    Environment = "dev"
+    Environment = var.environment
     Terraform   = "true"
   }
 }
@@ -591,7 +585,7 @@ resource "aws_iam_role" "eks_service_iam_role" {
         Condition = {
           StringEquals = {
             "${local.oidc_url}:aud" = "sts.amazonaws.com"
-            "${local.oidc_url}:sub" = "system:serviceaccount:beginner349-dev:beginner349-sa"
+            "${local.oidc_url}:sub" = "system:serviceaccount:beginner349-${var.environment}:beginner349-sa"
           }
         }
       }
@@ -637,7 +631,7 @@ resource "aws_iam_policy" "eso_policy" {
         "secretsmanager:DescribeSecret"
       ]
       Effect   = "Allow"
-      Resource = "arn:aws:secretsmanager:ap-southeast-1:542776678091:secret:dev/grafana-cloud/*"
+      Resource = "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:${var.environment}/grafana-cloud/*"
     }]
   })
 }

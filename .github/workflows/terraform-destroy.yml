@@ -11,9 +11,10 @@ jobs:
   terraform-destroy:
     name: 'Terraform Destroy'
     runs-on: ubuntu-latest
+    environment: dev
     defaults:
       run:
-        working-directory: ./terraform
+        working-directory: ./terraform/environments/dev
     env:
       TF_VAR_domain_name: ${{ vars.DOMAIN_NAME }}
       TF_VAR_AWS_ROLE_NAME: ${{ vars.AWS_ROLE_NAME }}
