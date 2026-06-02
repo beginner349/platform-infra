@@ -184,7 +184,7 @@ The Grafana Cloud API token is stored in AWS Secrets Manager at `dev/grafana-clo
 
 | Workflow | Trigger | Purpose |
 |---|---|---|
-| `terraform-deploy.yml` | Push to `main` or manual dispatch | Runs `terraform plan` then `terraform apply` (gated by `production` environment approval) |
+| `terraform-deploy.yml` | Push to `main` or manual dispatch | Runs `terraform plan` then `terraform apply` against the `dev` GitHub environment |
 | `terraform-destroy.yml` | Manual dispatch only | Full `terraform destroy` — manual-only trigger prevents accidental teardown |
 | `build-keycloak-image.yml` | Manual dispatch only | Builds custom Keycloak image (base `keycloak:26.6.1` + `realm.json`) and pushes to ECR |
 
@@ -217,6 +217,7 @@ State is stored in S3 with native file-based locking (no DynamoDB table required
 - **Key:** `terraform/state/platform-infra.tfstate`
 - **Region:** `ap-southeast-1`
 - **Locking:** `use_lockfile = true`
+- **Working directory:** `terraform/environments/dev` (the dev environment root)
 
 ### Input Variables
 
@@ -252,22 +253,28 @@ repository variables:
 platform-infra/
 ├── .github/
 │   └── workflows/
-│       ├── terraform-deploy.yml       # IaC deploy pipeline (plan → apply with 
-approval gate)
+│       ├── terraform-deploy.yml       # IaC deploy pipeline (plan → apply, dev environment)
 │       ├── terraform-destroy.yml      # Manual teardown only
 │       └── build-keycloak-image.yml   # Custom Keycloak image build and ECR push
 ├── Dockerfile                          # Keycloak image with realm.json baked in
 ├── keycloak/
-│   └── realm.json                      # Pre-configured Keycloak realm, client, and 
-user
+│   └── realm.json                      # Pre-configured Keycloak realm, client, and user
 └── terraform/
-    ├── main.tf                         # All AWS resources (VPC, ECS, EKS, ALB, IAM, 
-Aurora)
-    ├── access_entry.tf                 # EKS access entry for GitHub OIDC role
-    ├── backend.tf                      # S3 remote state backend configuration
-    ├── terraform.tf                    # Provider version constraints
-    ├── variables.tf                    # Input variable declarations
-    └── outputs.tf                      # Exported resource values
+    ├── modules/
+    │   └── platform/                   # Reusable platform module
+    │       ├── main.tf                 # All AWS resources (VPC, ECS, EKS, ALB, IAM, Aurora)
+    │       ├── access_entry.tf         # EKS access entry for GitHub OIDC role
+    │       ├── variables.tf            # Module input variables
+    │       ├── terraform.tf            # Provider version constraints
+    │       └── outputs.tf              # Module outputs
+    └── environments/
+        └── dev/                        # Dev environment root (calls the platform module)
+            ├── main.tf                 # module "platform" block
+            ├── backend.tf              # S3 remote state backend configuration
+            ├── providers.tf            # aws + tls provider config
+            ├── terraform.tf            # required_version + provider constraints
+            ├── variables.tf            # Environment input variables
+            └── outputs.tf              # Re-exported module outputs
 ```
 
 ## TODO
@@ -275,5 +282,6 @@ Aurora)
 - [x] Configuring an S3 Remote Backend for Terraform State and Locking
 - [x] Creating Infrastructure as Code (IaC) for IAM Roles for Service Accounts (IRSA)
 - [x] Create import files for Keycloak realms, users, and clients
+- [x] Structure Terraform project using module and directory-separated environments
 - [ ] Enable logging and monitoring in the EKS cluster
 - [ ] Implement TLS/SSL for the ingress with a custom domain using ExternalDNS and Route 53
