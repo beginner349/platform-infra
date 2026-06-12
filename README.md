@@ -205,9 +205,9 @@ All workflows authenticate to AWS via OIDC — no AWS access keys are stored as 
 
 | Tool | Version |
 |---|---|
-| Terraform | `~> 1.14.7` |
-| AWS Provider | `~> 6.28` |
-| TLS Provider | `4.2.1` |
+| Terraform | `~> 1.15.6` |
+| AWS Provider | `~> 6.50` |
+| TLS Provider | `4.3.0` |
 
 ### Backend Configuration
 
