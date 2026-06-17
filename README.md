@@ -1,9 +1,9 @@
 # Cloud-Native Platform: EKS + Keycloak + Full-Stack Observability
 
 [![Terraform Deploy](https://github.com/beginner349/platform-infra/actions/workflows/terraform-deploy.yml/badge.svg)](https://github.com/beginner349/platform-infra/actions/workflows/terraform-deploy.yml)
-![Terraform](https://img.shields.io/badge/Terraform-1.14-7B42BC?logo=terraform)
+![Terraform](https://img.shields.io/badge/Terraform-1.15-7B42BC?logo=terraform)
 ![AWS](https://img.shields.io/badge/AWS-EKS_Auto_Mode-FF9900?logo=amazonaws)
-![Spring Boot](https://img.shields.io/badge/Spring_Boot-4.0-6DB33F?logo=springboot)
+![Spring Boot](https://img.shields.io/badge/Spring_Boot-4.1-6DB33F?logo=springboot)
 ![Grafana](https://img.shields.io/badge/Grafana-Cloud-F46800?logo=grafana)
 
 A production-grade AWS platform built with Terraform, running a Spring Boot application on EKS alongside Keycloak on ECS Fargate, with end-to-end OpenTelemetry observability via Grafana Cloud and zero-credential secret management through the External Secrets Operator.
@@ -283,5 +283,6 @@ platform-infra/
 - [x] Creating Infrastructure as Code (IaC) for IAM Roles for Service Accounts (IRSA)
 - [x] Create import files for Keycloak realms, users, and clients
 - [x] Structure Terraform project using module and directory-separated environments
+- [ ] Deploy Keycloak Operator on EKS backed by CloudNativePG (remove ECS and RDS related resources)
 - [ ] Enable logging and monitoring in the EKS cluster
 - [ ] Implement TLS/SSL for the ingress with a custom domain using ExternalDNS and Route 53
