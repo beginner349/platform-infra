@@ -719,7 +719,7 @@ resource "aws_iam_role" "cnpg_backup_irsa" {
       Principal = { Federated = aws_iam_openid_connect_provider.eks_oidc_provider.arn }
       Condition = { StringEquals = {
         "${local.oidc_url}:aud" = "sts.amazonaws.com"
-        "${local.oidc_url}:sub" = "system:serviceaccount:keycloak:keycloak-db"
+        "${local.oidc_url}:sub" = "system:serviceaccount:keycloak:cnpg-keycloak"
       } }
     }]
   })
