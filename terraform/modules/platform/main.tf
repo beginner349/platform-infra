@@ -706,7 +706,7 @@ resource "aws_iam_role_policy_attachment" "external_dns_attach" {
 resource "aws_s3_bucket" "cnpg_backups" {
   bucket = "${var.environment}-keycloak-cnpg-backups-${data.aws_caller_identity.current.account_id}-${var.region}-an"  
   bucket_namespace = "account-regional"
-  false_destroy = true
+  force_destroy = true
 }
 
 resource "aws_iam_role" "cnpg_backup_irsa" {
