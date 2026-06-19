@@ -13,6 +13,7 @@ output "cluster_name" {
   value       = aws_eks_cluster.my-eks-cluster.id
 }
 
+/*
 output "alb_dns" {
   value = aws_lb.main_alb.dns_name
 }
@@ -37,3 +38,4 @@ output "aurora_secret_arn" {
   description = "The ARN of the Secrets Manager secret containing the DB credentials"
   value       = aws_rds_cluster.aurora_cluster.master_user_secret[0].secret_arn
 }
+*/

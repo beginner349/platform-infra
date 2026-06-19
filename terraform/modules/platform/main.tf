@@ -25,6 +25,8 @@ data "aws_route53_zone" "main" {
 
 data "aws_caller_identity" "current" {}
 
+# commented out
+/*
 ### ------------------------------------------------------------------------------
 ### 2. SECURITY GROUPS (NETWORK FIREWALLS)
 ### ------------------------------------------------------------------------------
@@ -392,6 +394,7 @@ resource "aws_route53_record" "alias_record_alb" {
     evaluate_target_health = true
   }
 }
+*/
 
 ### ------------------------------------------------------------------------------
 ### 6. LOCALS AND NETWORKING MODULE
@@ -639,4 +642,100 @@ resource "aws_iam_policy" "eso_policy" {
 resource "aws_iam_role_policy_attachment" "eso_policy_attachment" {
   role       = aws_iam_role.eso_irsa.name
   policy_arn = aws_iam_policy.eso_policy.arn
+}
+
+### ------------------------------------------------------------------------------
+
+resource "aws_iam_role" "external_dns_irsa" {
+  name = "external-dns-irsa"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRoleWithWebIdentity"
+        Effect = "Allow"
+        Principal = {
+          Federated = aws_iam_openid_connect_provider.eks_oidc_provider.arn
+        }
+        Condition = {
+          StringEquals = {
+            "${local.oidc_url}:aud" = "sts.amazonaws.com"
+            "${local.oidc_url}:sub" = "system:serviceaccount:external-dns:external-dns-sa"
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_policy" "external_dns_policy" {
+  name = "external-dns-policy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "route53:ChangeResourceRecordSets"
+        ]
+        Resource = [
+          "arn:aws:route53:::hostedzone/${data.aws_route53_zone.main.zone_id}"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "route53:ListHostedZones",
+          "route53:ListResourceRecordSets",
+          "route53:ListTagsForResources"
+        ]
+        Resource = [
+          "*"
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "external_dns_attach" {
+  role       = aws_iam_role.external_dns_irsa.name
+  policy_arn = aws_iam_policy.external_dns_policy.arn
+}
+
+resource "aws_s3_bucket" "cnpg_backups" {
+  bucket = "${var.environment}-keycloak-cnpg-backups-${data.aws_caller_identity.current.account_id}-ap-southeast-1-an"
+}
+
+resource "aws_iam_role" "cnpg_backup_irsa" {
+  name = "cnpg-backup-irsa"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRoleWithWebIdentity"
+      Effect    = "Allow"
+      Principal = { Federated = aws_iam_openid_connect_provider.eks_oidc_provider.arn }
+      Condition = { StringEquals = {
+        "${local.oidc_url}:aud" = "sts.amazonaws.com"
+        "${local.oidc_url}:sub" = "system:serviceaccount:keycloak:keycloak-db"
+      } }
+    }]
+  })
+}
+
+resource "aws_iam_policy" "cnpg_backup_policy" {
+  name = "cnpg-backup-policy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      { Effect = "Allow", Action = ["s3:ListBucket"], Resource = [aws_s3_bucket.cnpg_backups.arn] },
+      { Effect = "Allow", Action = ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"],
+        Resource = ["${aws_s3_bucket.cnpg_backups.arn}/*"] }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "cnpg_backup_attach" {
+  role       = aws_iam_role.cnpg_backup_irsa.name
+  policy_arn = aws_iam_policy.cnpg_backup_policy.arn
 }
