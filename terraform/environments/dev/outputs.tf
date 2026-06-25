@@ -14,6 +14,7 @@ output "cluster_name" {
 output "alb_dns" {
   value = module.platform.alb_dns
 }
+*/
 
 output "aurora_cluster_endpoint" {
   value = module.platform.aurora_cluster_endpoint
@@ -30,4 +31,3 @@ output "rds_username" {
 output "aurora_secret_arn" {
   value = module.platform.aurora_secret_arn
 }
-*/

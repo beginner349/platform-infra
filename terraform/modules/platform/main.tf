@@ -146,84 +146,6 @@ resource "aws_iam_role_policy_attachment" "ecs_secrets_attach" {
 }
 
 ### ------------------------------------------------------------------------------
-### 4. DATABASE (AURORA SERVERLESS V2)
-### ------------------------------------------------------------------------------
-
-# Security Group for Aurora Postgres (Allow inbound traffic strictly from the ECS SG)
-resource "aws_security_group" "aurora_sg" {
-  name   = "aurora-postgres-sg"
-  vpc_id = module.vpc.vpc_id
-
-  tags = local.tags
-}
-
-resource "aws_vpc_security_group_ingress_rule" "allow_tcp_traffic_from_ecs" {
-  security_group_id            = aws_security_group.aurora_sg.id
-  from_port                    = 5432
-  ip_protocol                  = "tcp"
-  to_port                      = 5432
-  referenced_security_group_id = aws_security_group.ecs_sg.id
-
-  tags = local.tags
-}
-
-resource "aws_vpc_security_group_egress_rule" "allow_all_traffic_aurora" {
-  security_group_id = aws_security_group.aurora_sg.id
-  cidr_ipv4         = "0.0.0.0/0"
-  ip_protocol       = "-1" # semantically equivalent to all ports
-
-  tags = local.tags
-}
-
-resource "aws_db_subnet_group" "aurora_subnet_group" {
-  name       = "aurora-db-subnet-group"
-  subnet_ids = module.vpc.database_subnets # Ensure DB is in database subnets
-  tags       = local.tags
-}
-
-resource "aws_rds_cluster" "aurora_cluster" {
-  cluster_identifier = "aurora-postgres-cluster"
-  engine             = "aurora-postgresql"
-  engine_mode        = "provisioned"
-  engine_version     = "17.7"
-  database_name      = "keycloak"
-  master_username    = "postgres"
-
-  # Automatically manages the password in Secrets Manager
-  manage_master_user_password = true
-
-  db_subnet_group_name   = aws_db_subnet_group.aurora_subnet_group.name
-  vpc_security_group_ids = [aws_security_group.aurora_sg.id]
-
-  # Allows `terraform destroy` to work cleanly without hanging to take a final snapshot of the database.
-  skip_final_snapshot = true
-
-  # Aurora Serverless v2 Scaling configuration
-  serverlessv2_scaling_configuration {
-    min_capacity = 0.5 # Minimum Aurora Capacity Units (ACUs)
-    max_capacity = 1.0 # Maximum ACUs (keeps costs completely capped for learning)
-  }
-
-  tags = local.tags
-}
-
-resource "aws_rds_cluster_instance" "aurora_instances" {
-  count              = 1 # Just 1 instance is needed for testing/learning
-  identifier         = "aurora-instance-${count.index}"
-  cluster_identifier = aws_rds_cluster.aurora_cluster.id
-  engine             = aws_rds_cluster.aurora_cluster.engine
-  engine_version     = aws_rds_cluster.aurora_cluster.engine_version
-
-  # "db.serverless" maps the instance to the Serverless v2 scaling config above
-  instance_class = "db.serverless"
-
-  publicly_accessible  = false
-  db_subnet_group_name = aws_db_subnet_group.aurora_subnet_group.name
-
-  tags = local.tags
-}
-
-### ------------------------------------------------------------------------------
 ### 5. COMPUTE AND NETWORKING
 ### ------------------------------------------------------------------------------
 
@@ -397,6 +319,84 @@ resource "aws_route53_record" "alias_record_alb" {
 */
 
 ### ------------------------------------------------------------------------------
+### 4. DATABASE (AURORA SERVERLESS V2)
+### ------------------------------------------------------------------------------
+
+# Security Group for Aurora Postgres (Allow inbound traffic strictly from the ECS SG)
+resource "aws_security_group" "aurora_sg" {
+  name   = "aurora-postgres-sg"
+  vpc_id = module.vpc.vpc_id
+
+  tags = local.tags
+}
+
+resource "aws_vpc_security_group_ingress_rule" "allow_tcp_traffic_from_ecs" {
+  security_group_id            = aws_security_group.aurora_sg.id
+  from_port                    = 5432
+  ip_protocol                  = "tcp"
+  to_port                      = 5432
+  referenced_security_group_id = aws_eks_cluster.my_eks_cluster.vpc_config[0].cluster_security_group_id
+
+  tags = local.tags
+}
+
+resource "aws_vpc_security_group_egress_rule" "allow_all_traffic_aurora" {
+  security_group_id = aws_security_group.aurora_sg.id
+  cidr_ipv4         = "0.0.0.0/0"
+  ip_protocol       = "-1" # semantically equivalent to all ports
+
+  tags = local.tags
+}
+
+resource "aws_db_subnet_group" "aurora_subnet_group" {
+  name       = "aurora-db-subnet-group"
+  subnet_ids = module.vpc.database_subnets # Ensure DB is in database subnets
+  tags       = local.tags
+}
+
+resource "aws_rds_cluster" "aurora_cluster" {
+  cluster_identifier = "keycloak-db"
+  engine             = "aurora-postgresql"
+  engine_mode        = "provisioned"
+  engine_version     = "18.3"
+  database_name      = "keycloak"
+  master_username    = "postgres"
+
+  # Automatically manages the password in Secrets Manager
+  manage_master_user_password = true
+
+  db_subnet_group_name   = aws_db_subnet_group.aurora_subnet_group.name
+  vpc_security_group_ids = [aws_security_group.aurora_sg.id]
+
+  # Allows `terraform destroy` to work cleanly without hanging to take a final snapshot of the database.
+  skip_final_snapshot = true
+
+  # Aurora Serverless v2 Scaling configuration
+  serverlessv2_scaling_configuration {
+    min_capacity = 1
+    max_capacity = 4
+  }
+
+  tags = local.tags
+}
+
+resource "aws_rds_cluster_instance" "aurora_instances" {
+  count              = 2
+  identifier         = "aurora-instance-${count.index}"
+  cluster_identifier = aws_rds_cluster.aurora_cluster.id
+  engine             = aws_rds_cluster.aurora_cluster.engine
+  engine_version     = aws_rds_cluster.aurora_cluster.engine_version
+
+  # "db.serverless" maps the instance to the Serverless v2 scaling config above
+  instance_class = "db.serverless"
+
+  publicly_accessible  = false
+  db_subnet_group_name = aws_db_subnet_group.aurora_subnet_group.name
+
+  tags = local.tags
+}
+
+### ------------------------------------------------------------------------------
 ### 6. LOCALS AND NETWORKING MODULE
 ### ------------------------------------------------------------------------------
 
@@ -441,7 +441,7 @@ module "vpc" {
   tags = local.tags
 }
 
-resource "aws_eks_cluster" "my-eks-cluster" {
+resource "aws_eks_cluster" "my_eks_cluster" {
   name    = "my-eks-cluster"
   version = "1.35"
 
@@ -562,11 +562,11 @@ resource "aws_iam_role_policy_attachment" "node_AmazonEC2ContainerRegistryPullOn
 }
 
 data "tls_certificate" "eks_tls_cert" {
-  url = aws_eks_cluster.my-eks-cluster.identity[0].oidc[0].issuer
+  url = aws_eks_cluster.my_eks_cluster.identity[0].oidc[0].issuer
 }
 
 resource "aws_iam_openid_connect_provider" "eks_oidc_provider" {
-  url = aws_eks_cluster.my-eks-cluster.identity[0].oidc[0].issuer
+  url = aws_eks_cluster.my_eks_cluster.identity[0].oidc[0].issuer
 
   client_id_list = ["sts.amazonaws.com"]
 
@@ -628,14 +628,18 @@ resource "aws_iam_policy" "eso_policy" {
   name = "eso-policy"
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Action = [
-        "secretsmanager:GetSecretValue",
-        "secretsmanager:DescribeSecret"
-      ]
-      Effect   = "Allow"
-      Resource = "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:${var.environment}/grafana-cloud/*"
-    }]
+    Statement = [
+      {
+        Action   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+        Effect   = "Allow"
+        Resource = "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:${var.environment}/grafana-cloud/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+        Resource = aws_rds_cluster.aurora_cluster.master_user_secret[0].secret_arn
+      }
+    ]
   })
 }
 
@@ -701,43 +705,4 @@ resource "aws_iam_policy" "external_dns_policy" {
 resource "aws_iam_role_policy_attachment" "external_dns_attach" {
   role       = aws_iam_role.external_dns_irsa.name
   policy_arn = aws_iam_policy.external_dns_policy.arn
-}
-
-resource "aws_s3_bucket" "cnpg_backups" {
-  bucket = "${var.environment}-keycloak-cnpg-backups-${data.aws_caller_identity.current.account_id}-${var.region}-an"  
-  bucket_namespace = "account-regional"
-  force_destroy = true
-}
-
-resource "aws_iam_role" "cnpg_backup_irsa" {
-  name = "cnpg-backup-irsa"
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Action    = "sts:AssumeRoleWithWebIdentity"
-      Effect    = "Allow"
-      Principal = { Federated = aws_iam_openid_connect_provider.eks_oidc_provider.arn }
-      Condition = { StringEquals = {
-        "${local.oidc_url}:aud" = "sts.amazonaws.com"
-        "${local.oidc_url}:sub" = "system:serviceaccount:keycloak:cnpg-keycloak"
-      } }
-    }]
-  })
-}
-
-resource "aws_iam_policy" "cnpg_backup_policy" {
-  name = "cnpg-backup-policy"
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      { Effect = "Allow", Action = ["s3:ListBucket"], Resource = [aws_s3_bucket.cnpg_backups.arn] },
-      { Effect = "Allow", Action = ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"],
-        Resource = ["${aws_s3_bucket.cnpg_backups.arn}/*"] }
-    ]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "cnpg_backup_attach" {
-  role       = aws_iam_role.cnpg_backup_irsa.name
-  policy_arn = aws_iam_policy.cnpg_backup_policy.arn
 }
