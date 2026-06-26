@@ -6,7 +6,7 @@
 ![Spring Boot](https://img.shields.io/badge/Spring_Boot-4.1-6DB33F?logo=springboot)
 ![Grafana](https://img.shields.io/badge/Grafana-Cloud-F46800?logo=grafana)
 
-A production-grade AWS platform built with Terraform, running a Spring Boot application on EKS alongside Keycloak on ECS Fargate, with end-to-end OpenTelemetry observability via Grafana Cloud and zero-credential secret management through the External Secrets Operator.
+A production-grade AWS platform built with Terraform, running a Spring Boot application and Keycloak on EKS — Keycloak managed declaratively by the Keycloak Operator — with end-to-end OpenTelemetry observability via Grafana Cloud and zero-credential secret management through the External Secrets Operator.
 
 ---
 
@@ -14,13 +14,13 @@ A production-grade AWS platform built with Terraform, running a Spring Boot appl
 
 This project is split across three purpose-built repositories that work together as a complete platform:
 
-| Repository                                                        | Role                            | Stack                                                                                               |
-|-------------------------------------------------------------------|---------------------------------|-----------------------------------------------------------------------------------------------------|
-| **platform-infra** (this repo)                                    | AWS infrastructure provisioning | Terraform, EKS Auto Mode, ECS Fargate, Aurora Serverless v2, DynamoDB, VPC, ALB, Route53, ACM, IRSA |
-| [beginner349-app](https://github.com/beginner349/beginner349-app) | Spring Boot application + CI/CD | Spring Boot 4.0, GitHub Actions, Docker, ECR, OpenTelemetry OTLP                                    |
-| [k8s-manifests](https://github.com/beginner349/k8s-manifests)     | Kubernetes workload definitions | Kustomize, Helm, External Secrets Operator, Grafana Alloy                                           |
+| Repository                                                        | Role                            | Stack                                                                                                           |
+|-------------------------------------------------------------------|---------------------------------|-----------------------------------------------------------------------------------------------------------------|
+| **platform-infra** (this repo)                                    | AWS infrastructure provisioning | Terraform, EKS Auto Mode, Aurora Serverless v2, DynamoDB, VPC, IRSA, Route53, ACM                               |
+| [beginner349-app](https://github.com/beginner349/beginner349-app) | Spring Boot application + CI/CD | Spring Boot 4.0, GitHub Actions, Docker, ECR, OpenTelemetry OTLP                                                |
+| [k8s-manifests](https://github.com/beginner349/k8s-manifests)     | Kubernetes workload definitions | ArgoCD (app-of-apps), Kustomize, Helm, Keycloak Operator, External Secrets Operator, ExternalDNS, Grafana Alloy |
 
-`platform-infra` provisions the cloud substrate (VPC, EKS cluster, ECS, IAM, networking). `k8s-manifests` deploys the application and supporting tooling (ESO, Grafana Alloy) onto the EKS cluster that this repo creates. `beginner349-app` is the workload itself — it ships to ECR via CI/CD and is deployed by `k8s-manifests`.
+`platform-infra` provisions the cloud substrate (VPC, EKS cluster, Aurora, IAM/IRSA, networking). `k8s-manifests` uses ArgoCD (app-of-apps) to deploy the application and supporting tooling (Keycloak Operator, ESO, ExternalDNS, Grafana Alloy) onto the EKS cluster that this repo creates. `beginner349-app` is the workload itself — it ships to ECR via CI/CD and is deployed by `k8s-manifests`.
 
 ---
 
@@ -38,7 +38,7 @@ flowchart LR
     
     gha_tf["Terraform Apply<br/>(OIDC auth)"]
     gha_app["Build + Docker<br/>(OIDC auth)"]
-    k8_deploy["Kubernetes deployment<br/>(OIDC auth)"]
+    k8_deploy["ArgoCD bootstrap<br/>(OIDC auth)"]
   end
 
   subgraph AWS ["AWS (ap-southeast-1)"]
@@ -56,7 +56,7 @@ flowchart LR
   gha_app -->|"push image"| ecr
 
   repo_k8s  -->k8_deploy
-  k8_deploy  -->|"Helm + Kustomize"| eks
+  k8_deploy  -->|"ArgoCD GitOps"| eks
   
   ecr -->|"pull image"| eks
 
@@ -69,57 +69,63 @@ flowchart TD
   end
 
   subgraph AWS_Cloud ["AWS Cloud (ap-southeast-1)"]
-    secrets_mgr["AWS Secrets Manager\ndev/grafana-cloud/*\nAurora DB creds"]
-    dynamodb[("DynamoDB")]      
+    secrets_mgr["AWS Secrets Manager\ndev/grafana-cloud/*\nAurora DB creds (rds!cluster-...)"]
+    dynamodb[("DynamoDB")]
     route53["Route53\nauth.beginner349.com"]
     acm["ACM SSL Cert"]
 
     subgraph VPC ["Custom VPC (10.0.0.0/16)"]
       subgraph Public ["Public Subnets"]
-        alb_kc["ALB: Keycloak\nHTTP → HTTPS redirect\nSSL Termination"]
-        alb_app["ALB: Spring Boot App"]
+        alb_kc["ALB Ingress: Keycloak\n(EKS Auto Mode)\nHTTP → HTTPS, SSL termination"]
+        alb_app["ALB Ingress: Spring Boot App\n(EKS Auto Mode)"]
       end
 
       subgraph Private ["Private Subnets"]
         subgraph EKS ["Amazon EKS (Auto Mode)"]
-          spring_boot["Spring Boot App\nOTLP → :4318"]
+          spring_boot["Spring Boot App\nns: beginner349-dev\nOTLP → :4318"]
+          kc_operator["Keycloak Operator\nns: keycloak"]
+          keycloak["Keycloak (3 replicas)\nRealm: KeycloakRealmImport CR"]
           eso["External Secrets Operator\nIRSA: eso-irsa"]
+          extdns["ExternalDNS\nIRSA: external-dns-irsa"]
           alloy["Grafana Alloy\n(metrics / logs / traces collector)"]
-          alloy_grafana_credentials["Grafana Cloud API token\n(k8 secret)"]
-        end
-
-        subgraph ECS ["ECS Fargate"]
-          keycloak["Keycloak\nRealm: pre-imported"]
+          kc_db_secret["keycloak-db-credentials\n(k8s secret)"]
+          alloy_grafana_credentials["Grafana Cloud API token\n(k8s secret)"]
         end
       end
 
       subgraph DB ["Database Subnets"]
-        aurora[("Aurora PostgreSQL\nServerless v2")]
+        aurora[("Aurora PostgreSQL\nServerless v2\ncluster: keycloak-db")]
       end
     end
   end
-  
+
   %% User traffic
   User((User)) --> route53
   route53 --> alb_kc
   acm -- "SSL Cert" --> alb_kc
-  alb_kc -- "Port 8080" --> keycloak
+  alb_kc --> keycloak
   alb_app --> spring_boot
+
+  %% DNS automation
+  extdns -- "manage records" --> route53
+
+  %% Keycloak lifecycle
+  kc_operator -- "reconciles" --> keycloak
 
   %% Data persistence
   keycloak --> aurora
   spring_boot --> dynamodb
-  secrets_mgr -- "DB password" --> keycloak
 
   %% Secrets flow (ESO)
   eso -- "IRSA: AssumeRoleWithWebIdentity" <--> secrets_mgr
-  eso -- "create" --> alloy_grafana_credentials
+  eso -- "sync" --> kc_db_secret
+  eso -- "sync" --> alloy_grafana_credentials
+  kc_db_secret -- "inject into" --> keycloak
   alloy_grafana_credentials -- "inject into" --> alloy
 
   %% Observability pipeline
   spring_boot -- "OTLP HTTP :4318" --> alloy
   alloy -- "Remote Write" --> grafana
-
 ```
 
 ---
@@ -128,17 +134,19 @@ flowchart TD
 
 - **EKS Auto Mode** — Node provisioning is fully managed; no EC2 node group configuration needed. Demonstrates cluster-level Kubernetes operations without operational overhead.
 
-- **ECS Fargate for Keycloak** — Keycloak is a stateful, long-lived identity service that doesn't benefit from the Kubernetes workload lifecycle. Running it on Fargate isolates it cleanly while keeping it inside the same VPC and behind the same ALB pattern.
+- **Keycloak Operator on EKS** — Keycloak runs in-cluster via the Keycloak Operator (a `Keycloak` CR, 3 replicas in the `keycloak` namespace). This consolidates all workloads onto EKS, lets Keycloak share the cluster's ALB-ingress and IRSA patterns, and makes realm/state changes GitOps-driven instead of baked into a container image.
 
-- **IRSA over static IAM keys** — Both the External Secrets Operator service account (`external-secrets-sa`) and the Spring Boot service account (`beginner349-sa`) assume IAM roles via OIDC token exchange. No long-lived credentials anywhere in the system.
+- **IRSA over static IAM keys** — The Spring Boot SA (`beginner349-sa` → DynamoDB), the External Secrets Operator SA (`external-secrets-sa` → Secrets Manager), and the ExternalDNS SA (`external-dns-sa` → Route53) each assume an IAM role via OIDC token exchange. No long-lived credentials anywhere in the system.
 
-- **External Secrets Operator for Grafana credentials** — Rather than storing the Grafana Cloud API token in CI/CD variables or a hardcoded Kubernetes Secret, ESO pulls `dev/grafana-cloud/*` from Secrets Manager at runtime and injects it into the Grafana Alloy pod. This is the GitOps-safe secret pattern.
+- **External Secrets Operator for runtime secrets** — Rather than storing the Grafana Cloud API token or the Keycloak DB password in CI/CD variables or hardcoded Secrets, ESO pulls `dev/grafana-cloud/*` and the RDS-managed Aurora credential secret from Secrets Manager at runtime, syncing them into Kubernetes Secrets (`alloy-grafana-credentials`, `keycloak-db-credentials`). This is the GitOps-safe secret pattern.
 
-- **Aurora Serverless v2 (0.5–1.0 ACUs)** — Scales to near-zero during idle periods, keeping demo costs negligible without sacrificing a production-like managed relational database architecture.
+- **Aurora Serverless v2 (1–4 ACUs)** — A production-like managed PostgreSQL (cluster `keycloak-db`, engine 18.3) backing Keycloak; scales with load while keeping demo costs low. Reachable only from the EKS cluster security group on port 5432.
 
-- **S3 native state locking (`use_lockfile = true`)** — Uses Terraform 1.14's built-in  S3 locking instead of a DynamoDB lock table, reducing the number of resources to  manage.
+- **S3 native state locking (`use_lockfile = true`)** — Uses Terraform's built-in S3 locking instead of a DynamoDB lock table, reducing the number of resources to  manage.
 
-- **Keycloak realm pre-imported via one-shot ECS task** — `realm.json` is baked into  the custom Keycloak Docker image and imported via a separate ECS task definition at  startup, making the realm configuration version-controlled and the import idempotent.
+- **Keycloak realm imported via `KeycloakRealmImport` CR** — The realm (`myrealm`, client `myclient`, user `myuser`) is declared as a Kubernetes custom resource that the operator reconciles, keeping the realm configuration version-controlled and the import idempotent — no custom Keycloak image required.
+
+- **EKS Auto Mode ingress + ExternalDNS** — Both the app and Keycloak are exposed via EKS Auto Mode-managed ALBs (`eks.amazonaws.com/alb`, IngressClass `alb`), and ExternalDNS manages the `auth.beginner349.com` Route53 record straight from the Ingress — replacing the previously hand-managed ALB and Route53 alias resources.
 
 ---
 
@@ -148,15 +156,15 @@ The following AWS resources are provisioned by this repository:
 
 | Layer | Resource | Notes |
 |---|---|---|
-| Compute | EKS Auto Mode (v1.35) | API auth mode; auto-provisioned nodes in private subnets |
-| Compute | ECS Fargate | Keycloak container + one-shot realm-import task |
-| Database | Aurora PostgreSQL Serverless v2 | 0.5–1.0 ACUs; password auto-managed by Secrets Manager |
+| Compute | EKS Auto Mode (v1.35) | API auth mode; auto-provisioned nodes; runs the app, Keycloak Operator, ESO, ExternalDNS, Alloy |
+| Database | Aurora PostgreSQL Serverless v2 | Cluster `keycloak-db`, engine 18.3, 1–4 ACUs, 2 instances; password auto-managed by Secrets Manager; ingress only from the EKS cluster SG |
 | Storage | DynamoDB | Application data for the Spring Boot service |
 | Networking | VPC (10.0.0.0/16) | 3 AZs; public / private / database subnets; single NAT gateway |
-| Networking | ALB × 2 | Keycloak (HTTPS + HTTP→HTTPS redirect); Spring Boot app |
-| DNS / TLS | Route53 + ACM | `auth.beginner349.com` alias record → Keycloak ALB |
-| IAM | IRSA: `eks-service-iam-role` | Spring Boot service account → DynamoDB read-only |
-| IAM | IRSA: `eso-irsa` | ESO service account → Secrets Manager `dev/grafana-cloud/*` |
+| Networking | ALB ingress (EKS Auto Mode) | Cluster-provisioned for the app and Keycloak Ingress (`eks.amazonaws.com/alb`); not a standalone Terraform ALB |
+| DNS / TLS | Route53 + ACM + ExternalDNS | ExternalDNS manages the `auth.beginner349.com` record; ACM cert (`auth.<domain>`) terminates TLS at the ALB |
+| IAM | IRSA: `eks-service-iam-role` | Spring Boot SA (`beginner349-sa`) → DynamoDB read-only |
+| IAM | IRSA: `eso-irsa` | ESO SA (`external-secrets-sa`) → Secrets Manager `dev/grafana-cloud/*` + Aurora DB secret |
+| IAM | IRSA: `external-dns-irsa` | ExternalDNS SA (`external-dns-sa`) → Route53 record changes |
 | IAM | GitHub OIDC role | Passwordless GitHub Actions → AWS auth (no access keys) |
 | IAM | EKS Access Entry | GitHub OIDC role granted cluster-admin for `k8s-manifests` deploys |
 | State | S3 Backend + native lock | Bucket name includes account ID for global uniqueness |
@@ -186,7 +194,6 @@ The Grafana Cloud API token is stored in AWS Secrets Manager at `dev/grafana-clo
 |---|---|---|
 | `terraform-deploy.yml` | Push to `main` or manual dispatch | Runs `terraform plan` then `terraform apply` against the `dev` GitHub environment |
 | `terraform-destroy.yml` | Manual dispatch only | Full `terraform destroy` — manual-only trigger prevents accidental teardown |
-| `build-keycloak-image.yml` | Manual dispatch only | Builds custom Keycloak image (base `keycloak:26.6.1` + `realm.json`) and pushes to ECR |
 
 All workflows authenticate to AWS via OIDC — no AWS access keys are stored as secrets.
 
@@ -239,7 +246,6 @@ repository variables:
 | `cluster_name` | EKS cluster name |
 | `cluster_endpoint` | EKS API server endpoint |
 | `cluster_security_group_id` | EKS control plane security group ID |
-| `alb_dns` | Keycloak ALB DNS name |
 | `aurora_cluster_endpoint` | Aurora writer endpoint |
 | `aurora_cluster_port` | Aurora port (default: 5432) |
 | `aurora_secret_arn` | Secrets Manager ARN for Aurora credentials |
@@ -254,15 +260,11 @@ platform-infra/
 ├── .github/
 │   └── workflows/
 │       ├── terraform-deploy.yml       # IaC deploy pipeline (plan → apply, dev environment)
-│       ├── terraform-destroy.yml      # Manual teardown only
-│       └── build-keycloak-image.yml   # Custom Keycloak image build and ECR push
-├── Dockerfile                          # Keycloak image with realm.json baked in
-├── keycloak/
-│   └── realm.json                      # Pre-configured Keycloak realm, client, and user
+│       └── terraform-destroy.yml      # Manual teardown only
 └── terraform/
     ├── modules/
     │   └── platform/                   # Reusable platform module
-    │       ├── main.tf                 # All AWS resources (VPC, ECS, EKS, ALB, IAM, Aurora)
+    │       ├── main.tf                 # AWS resources (VPC, EKS, Aurora, IAM/IRSA)
     │       ├── access_entry.tf         # EKS access entry for GitHub OIDC role
     │       ├── variables.tf            # Module input variables
     │       ├── terraform.tf            # Provider version constraints
@@ -283,6 +285,5 @@ platform-infra/
 - [x] Creating Infrastructure as Code (IaC) for IAM Roles for Service Accounts (IRSA)
 - [x] Create import files for Keycloak realms, users, and clients
 - [x] Structure Terraform project using module and directory-separated environments
-- [ ] Deploy Keycloak Operator on EKS backed by CloudNativePG (remove ECS and RDS related resources)
-- [ ] Enable logging and monitoring in the EKS cluster
-- [ ] Implement TLS/SSL for the ingress with a custom domain using ExternalDNS and Route 53
+- [x] Create resources (RDS, IAM Roles for Service Accounts (IRSA)) for Keycloak deployment using the Operator in EKS
+- [ ] Enable control plane, nodes and application logging in the EKS cluster
