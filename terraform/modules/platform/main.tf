@@ -129,7 +129,7 @@ resource "aws_iam_policy" "ecs_secrets_policy" {
       Action = "secretsmanager:GetSecretValue"
       Effect = "Allow"
       # This dynamically references the secret created by the Aurora module
-      Resource = aws_rds_cluster.aurora_cluster.master_user_secret[0].secret_arn
+      Resource = aws_secretsmanager_secret.keycloak_db.arn
     }]
   })
 }
@@ -176,7 +176,7 @@ resource "aws_ecs_task_definition" "keycloak_realm_import" {
     # Securely inject the password from Secrets Manager [6]
     secrets = [{
       name      = "KC_DB_PASSWORD"
-      valueFrom = "${aws_rds_cluster.aurora_cluster.master_user_secret[0].secret_arn}:password::"
+      valueFrom = "${aws_secretsmanager_secret.keycloak_db.arn}:password::"
     }]
     command = ["import", "--file", "/opt/keycloak/data/import/realm.json"]
 
@@ -226,7 +226,7 @@ resource "aws_ecs_task_definition" "keycloak_task_definition" {
     # Securely inject the password from Secrets Manager [6]
     secrets = [{
       name      = "KC_DB_PASSWORD"
-      valueFrom = "${aws_rds_cluster.aurora_cluster.master_user_secret[0].secret_arn}:password::"
+      valueFrom = "${aws_secretsmanager_secret.keycloak_db.arn}:password::"
     }]
     command = ["start"]
   }])
@@ -354,6 +354,25 @@ resource "aws_db_subnet_group" "aurora_subnet_group" {
   tags       = local.tags
 }
 
+resource "random_password" "password" {
+  length = 32
+  override_special = "!#$%&*()-_=+[]{}<>:?"
+}
+
+resource "aws_secretsmanager_secret" "keycloak_db" {
+  name                    = "keycloak/db-credentials"
+  recovery_window_in_days = 0 # local dev: delete immediately on destroy so the name frees up
+  tags                    = local.tags
+}
+
+resource "aws_secretsmanager_secret_version" "keycloak_db" {
+  secret_id = aws_secretsmanager_secret.keycloak_db.id
+  secret_string = jsonencode({
+    username = aws_rds_cluster.aurora_cluster.master_username
+    password = random_password.password.result
+  })
+}
+
 resource "aws_rds_cluster" "aurora_cluster" {
   cluster_identifier = "keycloak-db"
   engine             = "aurora-postgresql"
@@ -362,8 +381,8 @@ resource "aws_rds_cluster" "aurora_cluster" {
   database_name      = "keycloak"
   master_username    = "postgres"
 
-  # Automatically manages the password in Secrets Manager
-  manage_master_user_password = true
+  master_password_wo = random_password.password.result
+  master_password_wo_version = 1
 
   db_subnet_group_name   = aws_db_subnet_group.aurora_subnet_group.name
   vpc_security_group_ids = [aws_security_group.aurora_sg.id]
@@ -637,7 +656,7 @@ resource "aws_iam_policy" "eso_policy" {
       {
         Effect   = "Allow"
         Action   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
-        Resource = aws_rds_cluster.aurora_cluster.master_user_secret[0].secret_arn
+        Resource = aws_secretsmanager_secret.keycloak_db.arn
       }
     ]
   })

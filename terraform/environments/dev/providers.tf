@@ -3,3 +3,7 @@ provider "aws" {
 }
 
 provider "tls" {}
+
+provider "random" {
+
+}

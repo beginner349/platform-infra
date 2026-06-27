@@ -36,6 +36,6 @@ output "rds_username" {
 }
 
 output "aurora_secret_arn" {
-  description = "The ARN of the Secrets Manager secret containing the DB credentials"
-  value       = aws_rds_cluster.aurora_cluster.master_user_secret[0].secret_arn
+  description = "ARN of the Secrets Manager secret containing the DB credentials"
+  value       = aws_secretsmanager_secret.keycloak_db.arn
 }
