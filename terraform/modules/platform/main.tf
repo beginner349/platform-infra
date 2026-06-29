@@ -11,8 +11,8 @@ data "aws_availability_zones" "available" {
 }
 
 # Locates the SSL certificate for HTTPS termination on the ALB
-data "aws_acm_certificate" "auth_cert" {
-  domain   = "auth.${var.domain_name}"
+data "aws_acm_certificate" "wildcard" {
+  domain   = "*.${var.domain_name}"
   statuses = ["ISSUED"]
   types    = ["AMAZON_ISSUED"]
 }
@@ -296,7 +296,7 @@ resource "aws_lb_listener" "https" {
   port              = "443"
   protocol          = "HTTPS"
   ssl_policy        = "ELBSecurityPolicy-2016-08"
-  certificate_arn   = data.aws_acm_certificate.auth_cert.arn
+  certificate_arn   = data.aws_acm_certificate.wildcard.arn
 
   default_action {
     type             = "forward"
