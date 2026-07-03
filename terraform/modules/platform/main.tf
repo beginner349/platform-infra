@@ -425,8 +425,6 @@ locals {
 
   eks_cluster_name = "my-eks-cluster"
 
-  oidc_url = replace(aws_iam_openid_connect_provider.eks_oidc_provider.url, "https://", "")
-
   tags = {
     Environment = var.environment
     Terraform   = "true"
@@ -591,67 +589,38 @@ resource "aws_iam_role_policy_attachment" "node_AmazonEC2ContainerRegistryPullOn
   role       = aws_iam_role.node.name
 }
 
-data "tls_certificate" "eks_tls_cert" {
-  url = aws_eks_cluster.my_eks_cluster.identity[0].oidc[0].issuer
+data "aws_iam_policy_document" "pod_identity" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole", "sts:TagSession"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["pods.eks.amazonaws.com"]
+    }
+  }
 }
 
-resource "aws_iam_openid_connect_provider" "eks_oidc_provider" {
-  url = aws_eks_cluster.my_eks_cluster.identity[0].oidc[0].issuer
-
-  client_id_list = ["sts.amazonaws.com"]
-
-  thumbprint_list = [data.tls_certificate.eks_tls_cert.certificates[0].sha1_fingerprint]
-}
-
-resource "aws_iam_role" "eks_service_iam_role" {
-  name = "eks-service-iam-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRoleWithWebIdentity"
-        Effect = "Allow"
-        Principal = {
-          Federated = aws_iam_openid_connect_provider.eks_oidc_provider.arn
-        }
-        Condition = {
-          StringEquals = {
-            "${local.oidc_url}:aud" = "sts.amazonaws.com"
-            "${local.oidc_url}:sub" = "system:serviceaccount:beginner349-${var.environment}:beginner349-sa"
-          }
-        }
-      }
-    ]
-  })
+resource "aws_iam_role" "beginner349_app_iam_role" {
+  name               = "beginner349-app-iam-role"
+  assume_role_policy = data.aws_iam_policy_document.pod_identity.json
 }
 
 resource "aws_iam_role_policy_attachment" "role_policy_attach" {
-  role       = aws_iam_role.eks_service_iam_role.name
+  role       = aws_iam_role.beginner349_app_iam_role.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonDynamoDBReadOnlyAccess"
 }
 
-resource "aws_iam_role" "eso_irsa" {
-  name = "eso-irsa"
+resource "aws_eks_pod_identity_association" "beginner349" {
+  cluster_name    = aws_eks_cluster.my_eks_cluster.name
+  namespace       = "beginner349-${var.environment}"
+  service_account = "beginner349-sa"
+  role_arn        = aws_iam_role.beginner349_app_iam_role.arn
+}
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRoleWithWebIdentity"
-        Effect = "Allow"
-        Principal = {
-          Federated = aws_iam_openid_connect_provider.eks_oidc_provider.arn
-        }
-        Condition = {
-          StringEquals = {
-            "${local.oidc_url}:aud" = "sts.amazonaws.com"
-            "${local.oidc_url}:sub" = "system:serviceaccount:external-secrets:external-secrets-sa"
-          }
-        }
-      }
-    ]
-  })
+resource "aws_iam_role" "eso_irsa" {
+  name               = "eso-irsa"
+  assume_role_policy = data.aws_iam_policy_document.pod_identity.json
 }
 
 resource "aws_iam_policy" "eso_policy" {
@@ -678,27 +647,16 @@ resource "aws_iam_role_policy_attachment" "eso_policy_attachment" {
   policy_arn = aws_iam_policy.eso_policy.arn
 }
 
-resource "aws_iam_role" "external_dns_irsa" {
-  name = "external-dns-irsa"
+resource "aws_eks_pod_identity_association" "external_secrets" {
+  cluster_name    = aws_eks_cluster.my_eks_cluster.name
+  namespace       = "external-secrets"
+  service_account = "external-secrets-sa"
+  role_arn        = aws_iam_role.eso_irsa.arn
+}
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRoleWithWebIdentity"
-        Effect = "Allow"
-        Principal = {
-          Federated = aws_iam_openid_connect_provider.eks_oidc_provider.arn
-        }
-        Condition = {
-          StringEquals = {
-            "${local.oidc_url}:aud" = "sts.amazonaws.com"
-            "${local.oidc_url}:sub" = "system:serviceaccount:external-dns:external-dns-sa"
-          }
-        }
-      }
-    ]
-  })
+resource "aws_iam_role" "external_dns_irsa" {
+  name               = "external-dns-irsa"
+  assume_role_policy = data.aws_iam_policy_document.pod_identity.json
 }
 
 resource "aws_iam_policy" "external_dns_policy" {
@@ -733,4 +691,11 @@ resource "aws_iam_policy" "external_dns_policy" {
 resource "aws_iam_role_policy_attachment" "external_dns_attach" {
   role       = aws_iam_role.external_dns_irsa.name
   policy_arn = aws_iam_policy.external_dns_policy.arn
+}
+
+resource "aws_eks_pod_identity_association" "external_dns" {
+  cluster_name    = aws_eks_cluster.my_eks_cluster.name
+  namespace       = "external-dns"
+  service_account = "external-dns-sa"
+  role_arn        = aws_iam_role.external_dns_irsa.arn
 }
