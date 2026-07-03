@@ -423,6 +423,8 @@ locals {
   vpc_cidr = "10.0.0.0/16"
   azs      = slice(data.aws_availability_zones.available.names, 0, 3)
 
+  eks_cluster_name = "my-eks-cluster"
+
   oidc_url = replace(aws_iam_openid_connect_provider.eks_oidc_provider.url, "https://", "")
 
   tags = {
@@ -460,8 +462,25 @@ module "vpc" {
   tags = local.tags
 }
 
+# Pre-create the log groups that EKS control plane logging and the
+# amazon-cloudwatch-observability add-on would otherwise auto-create
+# with unlimited retention.
+resource "aws_cloudwatch_log_group" "eks_observability" {
+  for_each = toset([
+    "/aws/eks/${local.eks_cluster_name}/cluster",
+    "/aws/application-signals/data",
+    "/aws/containerinsights/${local.eks_cluster_name}/dataplane",
+    "/aws/containerinsights/${local.eks_cluster_name}/host",
+    "/aws/containerinsights/${local.eks_cluster_name}/performance",
+  ])
+
+  name              = each.value
+  retention_in_days = 30
+  tags              = local.tags
+}
+
 resource "aws_eks_cluster" "my_eks_cluster" {
-  name    = "my-eks-cluster"
+  name    = local.eks_cluster_name
   version = "1.35"
 
   bootstrap_self_managed_addons = false
@@ -509,6 +528,7 @@ resource "aws_eks_cluster" "my_eks_cluster" {
     aws_iam_role_policy_attachment.cluster_AmazonEKSLoadBalancingPolicy,
     aws_iam_role_policy_attachment.cluster_AmazonEKSNetworkingPolicy,
     aws_iam_role_policy_attachment.cloudwatch_observability,
+    aws_cloudwatch_log_group.eks_observability,
   ]
 
   tags = local.tags
