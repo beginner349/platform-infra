@@ -286,4 +286,6 @@ platform-infra/
 - [x] Create import files for Keycloak realms, users, and clients
 - [x] Structure Terraform project using module and directory-separated environments
 - [x] Create resources (RDS, IAM Roles for Service Accounts (IRSA)) for Keycloak deployment using the Operator in EKS
-- [ ] Enable control plane, nodes and application logging in the EKS cluster
+- [ ] Migrate from IAM Roles for Service Accounts (IRSA/OIDC) to EKS Pod Identity
+- [ ] Evaluate Amazon EKS Capability for Argo CD
+- [ ] Enable control plane and nodes logging in the EKS cluster

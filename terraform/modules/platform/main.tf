@@ -462,19 +462,8 @@ module "vpc" {
   tags = local.tags
 }
 
-# Pre-create the log groups that EKS control plane logging and the
-# amazon-cloudwatch-observability add-on would otherwise auto-create
-# with unlimited retention.
-resource "aws_cloudwatch_log_group" "eks_observability" {
-  for_each = toset([
-    "/aws/eks/${local.eks_cluster_name}/cluster",
-    "/aws/application-signals/data",
-    "/aws/containerinsights/${local.eks_cluster_name}/dataplane",
-    "/aws/containerinsights/${local.eks_cluster_name}/host",
-    "/aws/containerinsights/${local.eks_cluster_name}/performance",
-  ])
-
-  name              = each.value
+resource "aws_cloudwatch_log_group" "cluster_control_plane" {
+  name              = "/aws/eks/${local.eks_cluster_name}/cluster"
   retention_in_days = 30
   tags              = local.tags
 }
@@ -527,8 +516,7 @@ resource "aws_eks_cluster" "my_eks_cluster" {
     aws_iam_role_policy_attachment.cluster_AmazonEKSBlockStoragePolicy,
     aws_iam_role_policy_attachment.cluster_AmazonEKSLoadBalancingPolicy,
     aws_iam_role_policy_attachment.cluster_AmazonEKSNetworkingPolicy,
-    aws_iam_role_policy_attachment.cloudwatch_observability,
-    aws_cloudwatch_log_group.eks_observability,
+    aws_cloudwatch_log_group.cluster_control_plane,
   ]
 
   tags = local.tags
@@ -745,60 +733,4 @@ resource "aws_iam_policy" "external_dns_policy" {
 resource "aws_iam_role_policy_attachment" "external_dns_attach" {
   role       = aws_iam_role.external_dns_irsa.name
   policy_arn = aws_iam_policy.external_dns_policy.arn
-}
-
-# EKS Pod Identity role for the amazon-cloudwatch-observability add-on.
-# On EKS Auto Mode, pods cannot use the node instance role, and the
-# pod-identity agent is built into Auto Mode nodes (no extra add-on needed).
-resource "aws_iam_role" "cloudwatch_observability" {
-  name = "cloudwatch-observability-pod-identity"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Principal = {
-          Service = "pods.eks.amazonaws.com"
-        }
-        Action = ["sts:AssumeRole", "sts:TagSession"]
-      },
-    ]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "cloudwatch_observability" {
-  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
-  role       = aws_iam_role.cloudwatch_observability.name
-}
-
-resource "aws_eks_addon" "cloudwatch_observability" {
-  cluster_name  = aws_eks_cluster.my_eks_cluster.name
-  addon_name    = "amazon-cloudwatch-observability"
-  addon_version = "v6.3.0-eksbuild.1"
-
-  # Both the CloudWatch agent and the Fluent Bit daemonset run under the
-  # cloudwatch-agent service account in the amazon-cloudwatch namespace,
-  # so this single association covers all of the add-on's pods.
-  pod_identity_association {
-    role_arn        = aws_iam_role.cloudwatch_observability.arn
-    service_account = "cloudwatch-agent"
-  }
-
-  configuration_values = jsonencode({
-    containerLogs = {
-      enabled = true
-
-      fluentBit = {
-        config = {
-          extraFiles = {
-            # do not send application logs from the cluster
-            "application-log.conf" = ""
-          }
-        }
-      }
-    }
-  })
-
-  tags = local.tags
 }
