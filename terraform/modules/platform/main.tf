@@ -629,9 +629,9 @@ resource "aws_iam_policy" "eso_policy" {
     Version = "2012-10-17"
     Statement = [
       {
-        Action   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+        Action   = ["ssm:GetParameter"]
         Effect   = "Allow"
-        Resource = "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:${var.environment}/grafana-cloud/*"
+        Resource = "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/${var.environment}/grafana-cloud/*"
       },
       {
         Effect   = "Allow"
