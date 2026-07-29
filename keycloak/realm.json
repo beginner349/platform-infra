@@ -1,20 +1,26 @@
 {
+    "_comment": "DEPRECATED — not used. Realm config is now managed by the Keycloak Operator in realm-import.yaml from the k8s-manifests repository. Kept for reference/rollback only.",
     "realm": "myrealm",
     "enabled": true,
     "clients": [
         {
-            "clientId": "myclient",
+            "clientId": "react-client",
             "enabled": true,
             "protocol": "openid-connect",
             "publicClient": true,
             "redirectUris": [
-                "https://oauth.pstmn.io/v1/browser-callback"
+                "http://localhost:5173/*",
+                "https://beginner349-web.vercel.app/*"
             ],
             "webOrigins": [
                 "*"
             ],
             "standardFlowEnabled": true,
-            "directAccessGrantsEnabled": false
+            "directAccessGrantsEnabled": false,
+            "attributes": {
+                "post.logout.redirect.uris": "+",
+                "pkce.code.challenge.method": "S256"
+            }
         }
     ],
     "users": [
